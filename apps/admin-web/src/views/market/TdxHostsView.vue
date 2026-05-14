@@ -1,14 +1,25 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { addHost, listHosts, removeHostById, testAllHosts, type TdxHost } from '@/api/market'
+import {
+  addHost,
+  importHostsCfg,
+  listHosts,
+  removeHostById,
+  testAllHosts,
+  type TdxHost,
+} from '@/api/market'
 
 const hosts = ref<TdxHost[]>([])
 const loading = ref(false)
 const testing = ref(false)
+const uploading = ref(false)
 
 const dialogVisible = ref(false)
 const form = ref({ ip: '', port: 7709, name: '' })
+
+const importOptions = ref({ only_quote_ports: true, run_test: true })
+const fileInput = ref<HTMLInputElement | null>(null)
 
 async function refresh() {
   loading.value = true
@@ -58,6 +69,35 @@ function statusTagType(s: string) {
   return s === 'ok' ? 'success' : s === 'fail' ? 'danger' : 'info'
 }
 
+function pickCfgFile() {
+  fileInput.value?.click()
+}
+
+async function onCfgChosen(e: Event) {
+  const input = e.target as HTMLInputElement
+  const f = input.files?.[0]
+  // 先清空 value，避免连续选同一个文件不触发 change
+  input.value = ''
+  if (!f) return
+  if (f.size > 256 * 1024) {
+    ElMessage.error('文件过大，最大 256 KiB')
+    return
+  }
+  uploading.value = true
+  try {
+    const r = await importHostsCfg(f, {
+      only_quote_ports: importOptions.value.only_quote_ports,
+      run_test: importOptions.value.run_test,
+    })
+    ElMessage.success(
+      `解析 ${r.parsed} 条，保留 ${r.kept}，新增 ${r.added}，当前共 ${r.total}`,
+    )
+    await refresh()
+  } finally {
+    uploading.value = false
+  }
+}
+
 onMounted(refresh)
 </script>
 
@@ -67,9 +107,27 @@ onMounted(refresh)
       <div>
         <el-button :loading="testing" type="primary" @click="onTest">一键测速</el-button>
         <el-button @click="dialogVisible = true">添加主站</el-button>
+        <el-button :loading="uploading" @click="pickCfgFile">导入 connect.cfg</el-button>
         <el-button @click="refresh">刷新</el-button>
+        <input
+          ref="fileInput"
+          type="file"
+          accept=".cfg,.ini,.txt,text/plain"
+          style="display: none"
+          @change="onCfgChosen"
+        />
       </div>
       <div class="hint">7709/7708 为真实行情端口；7727 为扩展市场端口，不提供 K 线</div>
+    </div>
+
+    <div class="import-options">
+      <el-checkbox v-model="importOptions.only_quote_ports">
+        仅保留行情口 (7709 / 7708)
+      </el-checkbox>
+      <el-checkbox v-model="importOptions.run_test">导入后立即测速</el-checkbox>
+      <span class="hint">
+        从通达信安装目录的 <code>connect.cfg</code> 中批量导入主站，支持 GBK/UTF-8 编码，自动去重。
+      </span>
     </div>
 
     <el-table v-loading="loading" :data="hosts" stripe class="mt">
@@ -125,4 +183,17 @@ onMounted(refresh)
 .hint { color: #6b7280; font-size: 12px; }
 .mt { margin-top: 16px; }
 .ml { margin-left: 8px; }
+.import-options {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.import-options code {
+  padding: 1px 6px;
+  background: #f3f4f6;
+  border-radius: 4px;
+  font-size: 12px;
+}
 </style>

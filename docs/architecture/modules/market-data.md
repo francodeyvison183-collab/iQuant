@@ -19,7 +19,7 @@
 | 协议与适配器 | `packages/market-data` | TDX TCP 客户端、主站管理、连接池、本地文件扫描/解析、`MarketDataSource` 抽象 |
 | 业务用例 | `services/market-service` | ORM、仓储、用例（扫描、导入、查询、在线拉取、主站维护）、进度总线 |
 | 应用入口 | `apps/api` | REST 路由（`/api/v1/admin/market/*`）、SSE 进度流 |
-| 异步执行 | `apps/worker` | Celery 任务：`market.import_local`、`market.test_hosts` |
+| 异步执行 | `apps/worker` | Celery 任务：`market.import_local`、`market.online_batch`、`market.test_hosts` |
 | 前端 | `apps/admin-web` | Vue3 + Element Plus 后台 5 个面板 |
 | 数据 | `storage/migrations` | Alembic 业务库 + TimescaleDB 时序库迁移 |
 
@@ -52,9 +52,27 @@ TdxConnectionPool → TdxClient（带握手与差分解码） → MarketBarBatch
 TdxHostManager（连接池按主站轮询，分散压力）
 ```
 
-- 单次请求最多约 800 根，分页累计可拿数千根历史。
-- 协议错误/超时由连接池捕获，自动重连并切换主站重试。
-- 在线源不替代本地导入，定位为「单标的、最近 N 根」的补数路径。
+- 单次请求最多约 800 根；``fetch_bars_paged`` 按「最近 N 根」分页；单标的区间拉取仍可用 ``TdxClient.fetch_bars_in_range``（简单实现）。
+- **批量在线更新**（``/admin/market/online/batch``）走 ``TdxConnectionPool.fetch_bars_in_range_resilient`` + ``tdx/batch_runner.run_tdx_batch``，**完整继承 HQScanner 实战参数**：
+  - 连接池 ``max_size`` 与环境变量 ``IQUANT_TDX_POOL_SIZE`` **硬钳制 ≤8**（v2 验证 >8 易触发多主站协同封禁）。
+  - 首页 ``count`` 按区间粗估交易日 × 周期每日 bar 数（不足再翻 800 满页），减少固定拉满 800 的浪费。
+  - 分页间隔 **0.25s** + 微抖动；单页空响应：**先原连接 sleep 1.5s 重试**，再关闭连接换主站（最多 3 轮连接尝试），与 HQScanner ``_one_page`` 一致。
+  - **池级全局冷却**：连接连续失败 3 次 / 单页多次换线仍空 3 次 → **60s** 内拒绝新建连接，并输出 ``[TDX-BAN-DIAG]`` 聚合日志（字段设计对齐 HQScanner）。
+  - **批次级自适应并发**：初始 4、上限 min(8, 池上限)、下限 2；连续 200 次「单组合成功」升一档；批次连续 8 次失败 **熔断 60s** 并收缩并发；并与池 ``global_cooldown_until`` 联动暂停（对齐 ``tdx_batch_runner.py``）。
+  - 冷却期内抛出 ``TdxGlobalCooldown``，避免在 IP 已被限速时空转重试。
+- 协议错误/超时：关闭当次连接，下一协程从池中取用其他主站。
+- 提供两种使用方式：
+  - **单标的补数**：``/admin/market/online/fetch`` 同步拉取并入库，适合点位补缺（仍走 ``TdxMarketDataSource.fetch_bars`` / ``run_sync_with_retry``，非分页抗封禁全量）。
+  - **按市场/日期范围批量更新**：``/admin/market/online/batch`` 排队为 Celery 任务，``execute_batch_online_task`` 在 worker 内按 ``(代码 × 周期)`` 调度，进度通过 SSE 推送。
+- 标的来源：批量任务默认从 ``symbol`` 表按 ``markets`` 列出代码；用户也可显式传入 ``codes`` 覆盖。
+
+### 3.3 通达信主站接入
+
+主站列表有三条来源：
+
+1. **内置默认列表**：``DEFAULT_HOSTS``，覆盖深沪粤腾讯云常用行情主站，启动即用。
+2. **手动添加**：管理界面填入 ip+port+name。
+3. **上传 ``connect.cfg``**：``POST /admin/market/hosts/import-cfg`` 接收通达信安装目录的 ``connect.cfg``（multipart，支持 GBK/UTF-8/BOM），解析后按 ``ip:port`` 合并去重，可选 ``only_quote_ports`` 仅保留 7709/7708；默认导入后立即触发一次全量测速。
 
 ## 4. 数据流与表
 
@@ -94,12 +112,14 @@ TdxHostManager（连接池按主站轮询，分散压力）
 | `/api/v1/admin/market/hosts` | POST | 添加主站 |
 | `/api/v1/admin/market/hosts/{id}` | DELETE | 删除主站（内置主站不可删） |
 | `/api/v1/admin/market/hosts/test` | POST | 一键测速 |
+| `/api/v1/admin/market/hosts/import-cfg` | POST (multipart) | 上传通达信 `connect.cfg` 批量导入主站 |
 | `/api/v1/admin/market/scan/preview` | POST | 扫描 vipdoc 预览 |
 | `/api/v1/admin/market/import-tasks` | POST | 创建导入任务（增量/全量） |
 | `/api/v1/admin/market/import-tasks` | GET | 任务列表 |
 | `/api/v1/admin/market/import-tasks/{id}` | GET | 任务详情 |
 | `/api/v1/admin/market/import-tasks/{id}/progress` | GET (SSE) | 实时进度（Server-Sent Events） |
 | `/api/v1/admin/market/online/fetch` | POST | 单标的在线拉取并入库 |
+| `/api/v1/admin/market/online/batch` | POST | 按市场/日期范围/周期批量在线更新（异步） |
 | `/api/v1/admin/market/symbols` | GET | 标的分页列表（按市场/关键字） |
 | `/api/v1/admin/market/bars` | GET | 查询 K 线 |
 | `/api/v1/admin/market/coverage` | GET | 查询某标的某周期的数据覆盖范围 |
@@ -111,7 +131,7 @@ TdxHostManager（连接池按主站轮询，分散压力）
 | `/market/hosts` | 通达信主站：内置 + 自定义 + 一键测速 |
 | `/market/import` | 扫描预览 + 增量/全量导入入口 |
 | `/market/tasks` | 任务列表 + 选中任务后通过 SSE 实时刷新 |
-| `/market/online` | 在线 TDX 单标的补数 |
+| `/market/online` | 在线 TDX 补数：单标的 + 按市场/周期/日期范围批量更新 |
 | `/market/browser` | 标的浏览 + K 线 ECharts + 数据覆盖范围 |
 
 ## 8. Docker 与开发体验

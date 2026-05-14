@@ -6,7 +6,8 @@
         ├─ NotFoundError        # 资源不存在
         └─ MarketDataError      # 行情数据相关错误
                 ├─ TdxProtocolError     # TDX 协议错误
-                └─ TdxHostUnavailable   # 所有主站都不可用
+                ├─ TdxHostUnavailable   # 所有主站都不可用
+                └─ TdxGlobalCooldown    # 池级全局限速/冷却窗口内
 """
 from __future__ import annotations
 
@@ -41,3 +42,12 @@ class TdxProtocolError(MarketDataError):
 
 class TdxHostUnavailable(MarketDataError):
     code = "TDX_HOST_UNAVAILABLE"
+
+
+class TdxGlobalCooldown(MarketDataError):
+    """TDX 全局限速/封禁保护：冷却窗口内禁止新建连接，避免 IP 被协同拉黑。
+
+    与 HQScanner ``_PYTDX_KLINE_GLOBAL_COOLDOWN_UNTIL`` 语义对齐，供批次任务与连接池协同。
+    """
+
+    code = "TDX_GLOBAL_COOLDOWN"

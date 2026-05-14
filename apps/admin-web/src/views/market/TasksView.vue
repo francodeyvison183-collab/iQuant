@@ -57,6 +57,19 @@ function statusTag(s: string) {
   }[s] || 'info'
 }
 
+const TASK_TYPE_LABEL: Record<string, string> = {
+  incremental: '增量导入',
+  full: '全量导入',
+  online_fetch: '在线补数',
+  online_batch: '批量在线更新',
+}
+function taskTypeLabel(t: string) {
+  return TASK_TYPE_LABEL[t] || t
+}
+function unitLabel(t: string) {
+  return t === 'online_batch' ? '组合' : '文件'
+}
+
 function connectSSE(taskId: string) {
   closeSSE()
   sse = new EventSource(taskProgressUrl(taskId))
@@ -110,7 +123,9 @@ watch([page, pageSize], refresh)
               <el-link type="primary" @click="openTask(row.task_id)">{{ row.task_id.slice(0, 12) }}…</el-link>
             </template>
           </el-table-column>
-          <el-table-column prop="task_type" label="类型" width="110" />
+          <el-table-column label="类型" width="130">
+            <template #default="{ row }">{{ taskTypeLabel(row.task_type) }}</template>
+          </el-table-column>
           <el-table-column label="状态" width="110">
             <template #default="{ row }">
               <el-tag :type="statusTag(row.status) as any">{{ row.status }}</el-tag>
@@ -141,7 +156,7 @@ watch([page, pageSize], refresh)
         <div v-else>
           <el-descriptions :column="1" border>
             <el-descriptions-item label="task_id">{{ activeTask.task_id }}</el-descriptions-item>
-            <el-descriptions-item label="类型">{{ activeTask.task_type }}</el-descriptions-item>
+            <el-descriptions-item label="类型">{{ taskTypeLabel(activeTask.task_type) }}</el-descriptions-item>
             <el-descriptions-item label="状态">
               <el-tag :type="statusTag(activeTask.status) as any">{{ activeTask.status }}</el-tag>
             </el-descriptions-item>
@@ -155,7 +170,7 @@ watch([page, pageSize], refresh)
             :status="activeTask.status === 'failed' ? 'exception' : (activeTask.status === 'succeeded' ? 'success' : '')"
           />
           <div class="mt small">
-            完成 <strong>{{ activeTask.done_files }}</strong> / {{ activeTask.total_files }} 个文件，
+            完成 <strong>{{ activeTask.done_files }}</strong> / {{ activeTask.total_files }} 个{{ unitLabel(activeTask.task_type) }}，
             已导入 <strong>{{ activeTask.imported_bars }}</strong> 根 K 线，
             失败 <strong>{{ activeTask.error_count }}</strong>
           </div>

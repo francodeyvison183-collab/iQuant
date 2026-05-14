@@ -82,3 +82,10 @@ def enqueue_market_import(task_id: str) -> None:
     get_celery_client().send_task(
         "market.import_local", args=[task_id], queue="market", task_id=task_id
     )
+
+
+def enqueue_online_batch(task_id: str) -> None:
+    """投递在线批量更新任务到 Celery worker。"""
+    get_celery_client().send_task(
+        "market.online_batch", args=[task_id], queue="market", task_id=task_id
+    )

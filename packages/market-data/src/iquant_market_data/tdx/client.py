@@ -163,6 +163,54 @@ class TdxClient:
                 break
         return MarketBarBatch(full_code=full_code, period=period, bars=all_bars)
 
+    def fetch_bars_in_range(
+        self,
+        *,
+        full_code: str,
+        period: KlinePeriod,
+        start: datetime,
+        end: datetime | None = None,
+        page_size: int = 800,
+        hard_max_bars: int = 20000,
+    ) -> MarketBarBatch:
+        """按时间区间 ``[start, end]`` 拉取 K 线。
+
+        TDX 协议本身不支持按日期范围查询，只能按 ``offset`` 从最新一根开始往回翻页。
+        本方法的策略：
+
+        1. 持续以 ``page_size`` 为粒度往回翻页，把每页 prepend 到结果列表（最旧 → 最新）。
+        2. 当某一页的最旧 bar ``<= start``、或服务端返回 < page_size 根、
+           或累计达到 ``hard_max_bars`` 时停止。
+        3. 最后在累计结果上按 ``[start, end]`` 过滤，避免把请求段外的数据返回给调用方。
+
+        ``hard_max_bars`` 是安全闸：以 5 分钟周期为例，20000 根足够覆盖约 4 年数据，
+        正常使用足够，且能挡住"用户填了 1990 年 → 翻到天荒地老"的破坏性参数。
+        """
+        end_dt = end or datetime.now()
+        page_size = min(page_size, 800)
+        all_bars: list[MarketBar] = []
+        offset = 0
+        while len(all_bars) < hard_max_bars:
+            batch = self.fetch_bars(
+                full_code=full_code,
+                period=period,
+                offset=offset,
+                count=page_size,
+            )
+            if batch.is_empty:
+                break
+            all_bars[0:0] = batch.bars
+            oldest = batch.bars[0].bar_time
+            if oldest <= start:
+                break
+            if len(batch.bars) < page_size:
+                break
+            offset += len(batch.bars)
+        # 区间过滤；end_dt 用 < 还是 <=：日线/分钟线 bar_time 都是 bar 起点或交易日 0 点，
+        # 用 <= 保留 end 当天/当根。
+        filtered = [b for b in all_bars if start <= b.bar_time <= end_dt]
+        return MarketBarBatch(full_code=full_code, period=period, bars=filtered)
+
     # ── 协议封装 ──────────────────────────────────────────────────────────────
 
     @staticmethod

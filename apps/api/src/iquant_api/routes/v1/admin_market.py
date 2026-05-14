@@ -12,20 +12,22 @@ import logging
 from datetime import datetime
 from typing import AsyncIterator
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from iquant_domain.market import KlinePeriod
+from iquant_domain.market import KlinePeriod, Market
 from iquant_market_service.db import pg_session
 from iquant_market_service.models import MarketImportTaskType
 from iquant_market_service.progress_bus import subscribe
 from iquant_market_service.repositories.import_task_repo import ImportTaskRepo
 from iquant_market_service.repositories.symbol_repo import SymbolRepo
+from iquant_market_service.usecases.batch_online_fetch import enqueue_batch_online_task
 from iquant_market_service.usecases.fetch_online import fetch_and_save_online
 from iquant_market_service.usecases.import_local import enqueue_import_task
 from iquant_market_service.usecases.manage_hosts import (
     add_host,
+    import_hosts_from_cfg,
     list_hosts,
     remove_host,
     test_hosts,
@@ -33,7 +35,10 @@ from iquant_market_service.usecases.manage_hosts import (
 from iquant_market_service.usecases.query_bars import get_symbol_coverage, query_bars
 from iquant_market_service.usecases.scan_local import scan_local_preview
 
-from ...bootstrap import enqueue_market_import
+from ...bootstrap import enqueue_market_import, enqueue_online_batch
+
+# 通达信 connect.cfg 通常 < 16 KiB，给个宽松的安全上限避免上传超大文件
+_MAX_CFG_BYTES = 256 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +81,33 @@ async def api_remove_host(host_id: int) -> dict:
 async def api_test_hosts() -> dict:
     hosts = await test_hosts()
     return {"code": 0, "data": [h.to_dict() for h in hosts]}
+
+
+@router.post("/hosts/import-cfg")
+async def api_import_hosts_cfg(
+    file: UploadFile = File(...),
+    only_quote_ports: bool = Query(default=True),
+    run_test: bool = Query(default=True),
+) -> dict:
+    """上传通达信 ``connect.cfg`` 文件批量导入主站。
+
+    - ``only_quote_ports``：仅保留 7709/7708 行情口（默认 True；扩展 7727 不返回 K 线）。
+    - ``run_test``：导入后立即触发一次全量测速（默认 True）。
+    """
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="文件为空")
+    if len(raw) > _MAX_CFG_BYTES:
+        raise HTTPException(
+            status_code=413, detail=f"文件过大，最大 {_MAX_CFG_BYTES // 1024} KiB"
+        )
+    try:
+        result = await import_hosts_from_cfg(
+            raw, only_quote_ports=only_quote_ports, run_test=run_test
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"code": 0, "data": result}
 
 
 # ─── 本地 vipdoc 扫描 ──────────────────────────────────────────────────────────
@@ -191,6 +223,39 @@ async def api_online_fetch(payload: OnlineFetchIn) -> dict:
         max_count=payload.max_count,
     )
     return {"code": 0, "data": {"inserted": inserted}}
+
+
+class OnlineBatchIn(BaseModel):
+    """在线批量更新入参。
+
+    - ``markets``：市场列表；``codes`` 都为空时，按 ``markets`` 从 ``symbol`` 表枚举代码。
+    - ``codes``：显式标的列表（``sh600519`` 形式），优先级高于 ``markets``。
+    - ``periods``：周期列表，至少 1 个；MVP 支持 5m/30m/day/week 等。
+    - ``start_date``：必填，``YYYY-MM-DD`` 或 ISO 时间字符串。
+    - ``end_date``：可选；省略表示到今天。
+    """
+
+    markets: list[Market] | None = None
+    codes: list[str] | None = None
+    periods: list[KlinePeriod] = Field(default_factory=list)
+    start_date: str
+    end_date: str | None = None
+
+
+@router.post("/online/batch")
+async def api_online_batch(payload: OnlineBatchIn) -> dict:
+    try:
+        ref = await enqueue_batch_online_task(
+            markets=payload.markets,
+            periods=payload.periods,
+            codes=payload.codes,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            enqueuer=enqueue_online_batch,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"code": 0, "data": ref.model_dump()}
 
 
 # ─── 数据查看 ─────────────────────────────────────────────────────────────────

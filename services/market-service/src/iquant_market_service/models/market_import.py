@@ -16,6 +16,7 @@ class MarketImportTaskType(StrEnum):
     INCREMENTAL = "incremental"
     FULL = "full"
     ONLINE_FETCH = "online_fetch"  # 单标的在线补数
+    ONLINE_BATCH = "online_batch"  # 按市场/日期范围/周期批量在线更新
 
 
 class MarketImportTaskStatus(StrEnum):

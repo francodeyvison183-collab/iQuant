@@ -23,6 +23,11 @@ class TdxMarketDataSource:
     def __init__(self, pool: TdxConnectionPool) -> None:
         self._pool = pool
 
+    @property
+    def pool(self) -> TdxConnectionPool:
+        """暴露底层连接池，供需要直接调度 ``TdxClient`` 同步方法的用例使用。"""
+        return self._pool
+
     async def list_symbols(self) -> list[Symbol]:
         """在线列出所有标的。
 
