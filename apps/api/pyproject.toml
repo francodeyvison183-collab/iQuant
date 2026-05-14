@@ -1,0 +1,27 @@
+[project]
+name = "iquant-api"
+version = "0.1.0"
+description = "iQuant FastAPI 应用"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "iquant-domain",
+    "iquant-market-data",
+    "iquant-market-service",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "gunicorn>=23.0.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.4.0",
+    "celery[redis]>=5.4.0",
+    "redis>=5.0.8",
+    "structlog>=24.4.0",
+    "sse-starlette>=2.1.3",
+    "psycopg[binary]>=3.2.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/iquant_api"]

@@ -1,0 +1,15 @@
+[project]
+name = "iquant-domain"
+version = "0.1.0"
+description = "iQuant 领域模型：纯 Pydantic 模型，无 I/O 依赖"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic>=2.7.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/iquant_domain"]

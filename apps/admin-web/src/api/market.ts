@@ -1,0 +1,124 @@
+import { del, get, post } from './client'
+
+export interface TdxHost {
+  id?: number
+  is_builtin?: boolean
+  ip: string
+  port: number
+  name: string
+  status: 'untested' | 'ok' | 'fail'
+  speed_ms: number
+  last_tested: string | null
+  fail_since: string | null
+}
+
+export interface ImportTask {
+  task_id: string
+  task_type: 'incremental' | 'full' | 'online_fetch'
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  params: Record<string, unknown>
+  total_files: number
+  done_files: number
+  imported_bars: number
+  error_count: number
+  error_message: string | null
+  started_at: string | null
+  finished_at: string | null
+  created_at: string | null
+}
+
+export interface ScanPreview {
+  data_dir: string
+  total_files: number
+  by_period: Record<string, number>
+  by_market: Record<string, Record<string, number>>
+  changed_files: number
+  unchanged_files: number
+}
+
+export interface SymbolItem {
+  full_code: string
+  code: string
+  market: string
+  name: string
+  asset_type: string
+  list_date: string | null
+}
+
+export interface BarPoint {
+  bar_time: string
+  open: string
+  high: string
+  low: string
+  close: string
+  volume: number
+  amount: string
+}
+
+export interface BarQueryResult {
+  full_code: string
+  period: string
+  bars: BarPoint[]
+}
+
+export interface SymbolCoverage {
+  full_code: string
+  period: string
+  first_bar_time: string | null
+  last_bar_time: string | null
+  bar_count: number
+}
+
+// ── 主站 ─────────────────────────────────────────────────────────────────────
+export const listHosts = () => get<TdxHost[]>('/admin/market/hosts')
+export const addHost = (payload: { ip: string; port: number; name?: string }) =>
+  post<TdxHost>('/admin/market/hosts', payload)
+export const removeHostById = (id: number) => del<null>(`/admin/market/hosts/${id}`)
+export const testAllHosts = () => post<TdxHost[]>('/admin/market/hosts/test')
+
+// ── 扫描 / 导入 ──────────────────────────────────────────────────────────────
+export const scanPreview = (vipdoc_dir?: string) =>
+  post<ScanPreview>('/admin/market/scan/preview', { vipdoc_dir })
+
+export const createImportTask = (payload: {
+  task_type: 'incremental' | 'full'
+  vipdoc_dir?: string
+}) => post<{ task_id: string; status: string }>('/admin/market/import-tasks', payload)
+
+export const listImportTasks = (params?: {
+  status?: string
+  limit?: number
+  offset?: number
+}) => get<ImportTask[]>('/admin/market/import-tasks', params)
+
+export const getImportTask = (taskId: string) =>
+  get<ImportTask>(`/admin/market/import-tasks/${taskId}`)
+
+export const taskProgressUrl = (taskId: string) =>
+  `/api/v1/admin/market/import-tasks/${taskId}/progress`
+
+// ── 在线补数 ─────────────────────────────────────────────────────────────────
+export const onlineFetch = (payload: {
+  full_code: string
+  period: string
+  max_count?: number
+}) => post<{ inserted: number }>('/admin/market/online/fetch', payload)
+
+// ── 数据查看 ─────────────────────────────────────────────────────────────────
+export const listSymbols = (params?: {
+  market?: string
+  keyword?: string
+  limit?: number
+  offset?: number
+}) => get<SymbolItem[]>('/admin/market/symbols', params)
+
+export const queryBars = (params: {
+  full_code: string
+  period: string
+  start?: string
+  end?: string
+  limit?: number
+}) => get<BarQueryResult>('/admin/market/bars', params)
+
+export const getCoverage = (params: { full_code: string; period: string }) =>
+  get<SymbolCoverage>('/admin/market/coverage', params)

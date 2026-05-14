@@ -1,0 +1,126 @@
+# ==============================================================================
+# iQuant 生产部署 compose
+# 镜像内固化代码与依赖；只挂数据卷
+# ==============================================================================
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: iquant-postgres
+    environment:
+      POSTGRES_DB: ${IQUANT_PG_DB:-iquant}
+      POSTGRES_USER: ${IQUANT_PG_USER:-iquant}
+      POSTGRES_PASSWORD: ${IQUANT_PG_PASSWORD:-iquant_dev_pwd}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${IQUANT_PG_USER:-iquant}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  timescaledb:
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: iquant-timescaledb
+    environment:
+      POSTGRES_DB: ${IQUANT_TS_DB:-iquant_market}
+      POSTGRES_USER: ${IQUANT_TS_USER:-iquant}
+      POSTGRES_PASSWORD: ${IQUANT_TS_PASSWORD:-iquant_dev_pwd}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${IQUANT_TS_USER:-iquant}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: iquant-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: iquant-api:latest
+    container_name: iquant-api
+    env_file: .env
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    depends_on:
+      postgres: { condition: service_healthy }
+      timescaledb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports:
+      - "8000:8000"
+    volumes:
+      # 只读挂载宿主机通达信目录，用于本地文件历史数据导入
+      - ${IQUANT_TDX_VIPDOC_HOST_DIR:-./storage/local/tdx_vipdoc}:${IQUANT_TDX_VIPDOC_DIR:-/data/tdx/vipdoc}:ro
+      - logs_data:/workspace/logs
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: iquant-api:latest
+    container_name: iquant-worker
+    env_file: .env
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    depends_on:
+      postgres: { condition: service_healthy }
+      timescaledb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    command: >
+      celery -A iquant_worker.celery_app worker
+      -l INFO
+      -Q market,default
+      --concurrency=4
+    volumes:
+      - ${IQUANT_TDX_VIPDOC_HOST_DIR:-./storage/local/tdx_vipdoc}:${IQUANT_TDX_VIPDOC_DIR:-/data/tdx/vipdoc}:ro
+      - logs_data:/workspace/logs
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: iquant-api:latest
+    container_name: iquant-beat
+    env_file: .env
+    depends_on:
+      redis: { condition: service_healthy }
+    command: >
+      celery -A iquant_worker.celery_app beat -l INFO
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  timescale_data:
+  redis_data:
+  logs_data:

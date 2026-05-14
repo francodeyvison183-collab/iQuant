@@ -1,0 +1,49 @@
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+.tox/
+
+# uv / venv
+.venv/
+venv/
+
+# ── 环境与机密 ──────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Node / 前端 ─────────────────────────────────────────────────────────────
+node_modules/
+pnpm-debug.log*
+.pnpm-store/
+apps/admin-web/dist/
+apps/admin-web/.vite/
+
+# ── 日志与本地数据 ──────────────────────────────────────────────────────────
+logs/
+*.log
+storage/local/
+data/
+tmp/
+
+# ── 编辑器 ──────────────────────────────────────────────────────────────────
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.example.json
+*.swp
+
+# ── OS ──────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

@@ -1,0 +1,164 @@
+# ==============================================================================
+# iQuant 开发模式 compose
+# - 源码通过卷挂载进容器
+# - 后端通过 uvicorn --reload 热更新；Celery worker 通过 watchfiles 监控变更
+# - 前端 Vite dev server 提供热更新
+# 使用：
+#   docker compose -f docker-compose.dev.yml up
+# ==============================================================================
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: iquant-postgres-dev
+    environment:
+      POSTGRES_DB: ${IQUANT_PG_DB:-iquant}
+      POSTGRES_USER: ${IQUANT_PG_USER:-iquant}
+      POSTGRES_PASSWORD: ${IQUANT_PG_PASSWORD:-iquant_dev_pwd}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${IQUANT_PG_USER:-iquant}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  timescaledb:
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: iquant-timescaledb-dev
+    environment:
+      POSTGRES_DB: ${IQUANT_TS_DB:-iquant_market}
+      POSTGRES_USER: ${IQUANT_TS_USER:-iquant}
+      POSTGRES_PASSWORD: ${IQUANT_TS_PASSWORD:-iquant_dev_pwd}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - timescale_data_dev:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${IQUANT_TS_USER:-iquant}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: iquant-redis-dev
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data_dev:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: iquant-dev:latest
+    container_name: iquant-api-dev
+    env_file: .env
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      IQUANT_ENV: local
+      # uvicorn --reload 在 Docker for Windows / Mac 上需要轮询监听
+      WATCHFILES_FORCE_POLLING: "true"
+    depends_on:
+      postgres: { condition: service_healthy }
+      timescaledb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports:
+      - "8000:8000"
+    volumes:
+      # 整个仓库挂入容器，源码即改即生效
+      - .:/workspace
+      # uv 缓存在卷里，避免每次 rebuild
+      - uv_cache:/root/.cache/uv
+      # 只读挂载宿主机通达信 vipdoc 目录（按 .env 配置）
+      - ${IQUANT_TDX_VIPDOC_HOST_DIR:-./storage/local/tdx_vipdoc}:${IQUANT_TDX_VIPDOC_DIR:-/data/tdx/vipdoc}:ro
+    working_dir: /workspace
+    command: >
+      bash -c "
+      uv sync --all-extras &&
+      .venv/bin/alembic -c storage/migrations/alembic.ini upgrade head &&
+      .venv/bin/uvicorn iquant_api.main:app
+        --host 0.0.0.0 --port 8000
+        --reload
+        --reload-dir /workspace/apps/api/src
+        --reload-dir /workspace/services
+        --reload-dir /workspace/packages
+        --reload-exclude '*/__pycache__/*'
+        --reload-exclude '*/node_modules/*'
+        --reload-exclude '*/.venv/*'
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: iquant-dev:latest
+    container_name: iquant-worker-dev
+    env_file: .env
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      WATCHFILES_FORCE_POLLING: "true"
+    depends_on:
+      postgres: { condition: service_healthy }
+      timescaledb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    volumes:
+      - .:/workspace
+      - uv_cache:/root/.cache/uv
+      - ${IQUANT_TDX_VIPDOC_HOST_DIR:-./storage/local/tdx_vipdoc}:${IQUANT_TDX_VIPDOC_DIR:-/data/tdx/vipdoc}:ro
+    working_dir: /workspace
+    # watchfiles 包装 celery，源码变更自动重启 worker
+    command: >
+      bash -c "
+      uv sync --all-extras &&
+      .venv/bin/watchfiles
+        --filter python
+        --ignore-paths '.venv,node_modules,__pycache__,logs,storage/local'
+        '.venv/bin/celery -A iquant_worker.celery_app worker -l INFO -Q market,default --concurrency=2'
+        /workspace/apps/worker/src /workspace/services /workspace/packages
+      "
+
+  admin-web:
+    image: node:20-alpine
+    container_name: iquant-admin-web-dev
+    working_dir: /workspace/apps/admin-web
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      VITE_API_BASE: ""
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - .:/workspace
+      - admin_web_node_modules:/workspace/apps/admin-web/node_modules
+    ports:
+      - "${IQUANT_ADMIN_WEB_PORT:-5173}:5173"
+    depends_on:
+      - api
+    command: >
+      sh -c "
+      corepack enable &&
+      (test -d node_modules || pnpm install --registry=https://registry.npmmirror.com) &&
+      pnpm dev --host 0.0.0.0 --port 5173
+      "
+
+volumes:
+  postgres_data_dev:
+  timescale_data_dev:
+  redis_data_dev:
+  uv_cache:
+  admin_web_node_modules:
