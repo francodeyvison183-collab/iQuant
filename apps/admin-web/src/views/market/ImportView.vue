@@ -59,8 +59,8 @@ onMounted(() => {
       </el-form-item>
       <el-form-item label="任务类型">
         <el-radio-group v-model="taskType">
-          <el-radio-button label="incremental">增量更新</el-radio-button>
-          <el-radio-button label="full">全量重导</el-radio-button>
+          <el-radio-button value="incremental">增量更新</el-radio-button>
+          <el-radio-button value="full">全量重导</el-radio-button>
         </el-radio-group>
       </el-form-item>
       <el-form-item>

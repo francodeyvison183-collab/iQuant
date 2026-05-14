@@ -36,7 +36,7 @@ COPY packages/domain/pyproject.toml ./packages/domain/
 COPY packages/market-data/pyproject.toml ./packages/market-data/
 
 # 依赖解析（允许 lock 缺失：首次构建会现解算）
-RUN uv sync --no-install-project --all-extras
+RUN uv sync --all-packages --group dev
 
 EXPOSE 8000
 

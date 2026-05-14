@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterView, useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
 const router = useRouter()
@@ -44,7 +44,7 @@ function goto(path: string) {
         </div>
       </el-header>
       <el-main class="main">
-        <slot />
+        <RouterView />
       </el-main>
     </el-container>
   </el-container>

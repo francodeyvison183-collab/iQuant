@@ -78,10 +78,13 @@ FastAPI 选型理由记录于 [ADR-0005](../decisions/ADR-0005-fastapi-as-web-fr
 | 高性能数据帧 | Polars | 大批量行情扫描、特征提取场景使用 |
 | 技术指标 | TA-Lib + pandas-ta | TA-Lib 优先（C 实现），pandas-ta 兜底纯 Python 指标 |
 | 加速 | Numba（按需） | 仅在已识别的热点路径使用，避免无意义引入 |
-| 回测核心 | 自研（基于 packages/backtest-engine） | 必须保证无未来函数，详见模块文档 |
+| DSL 求值 + 成交撮合 | 自研（`packages/backtest-engine` 内 `evaluator/`、`execution/`、`invariants/`） | 与盲测/诊断模块共享同一求值器；A 股 T+1、涨跌停、停牌、复权与"无未来函数"不变式由此层保证 |
+| 收益风险指标 | empyrical-reloaded（必选）+ quantstats（可选） | 仅在 `packages/backtest-engine/metrics/` 内调用，对外只暴露 iQuant 自有 schema |
 | K 线存储格式 | Parquet | 离线分析与冷数据存储用 |
 
-vectorbt、backtrader 等第三方回测框架在 MVP 不引入，避免与策略 DSL 语义不对齐。
+回测引擎的自研/复用边界详见 [ADR-0009](../decisions/ADR-0009-backtest-engine-boundary.md)。
+
+**显式不引入的第三方回测框架**：vectorbt（AGPL-3.0，SaaS 合规风险）、vectorbt PRO（按席位商业授权）、backtrader（GPL，且项目停滞）、backtesting.py（AGPL）、zipline-reloaded（license 安全但 A 股适配工作量大、社区稀薄）。核心理由：上述框架是 signal-in/metric-out 接口，无法承载盲测与诊断模块所需的逐 bar 求值轨迹，使用它们会被迫维护两套必须永远一致的信号生成器。
 
 ## 7. AI 与外部模型
 

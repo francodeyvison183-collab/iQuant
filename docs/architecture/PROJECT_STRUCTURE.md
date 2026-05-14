@@ -252,7 +252,15 @@ features/
 
 ### 5.4 packages/backtest-engine
 
-回测引擎。
+回测引擎。自研/复用边界见 [ADR-0009](../decisions/ADR-0009-backtest-engine-boundary.md)。
+
+子包：
+
+- `evaluator/`：DSL → 逐 bar 求值结果 → 信号事件。自研，盲测与诊断模块复用同一求值器。
+- `execution/`：成交撮合（A 股 T+1、涨跌停、停牌、复权、滑点、手续费）。自研。
+- `invariants/`：无未来函数检查与属性测试支持。自研。
+- `metrics/`：收益风险指标（Sharpe / Sortino / 最大回撤 / Calmar / 胜率 / 盈亏比 / 资金曲线等）。**唯一允许 import empyrical-reloaded / quantstats 的子包**。
+- `report/`：输出 `BacktestReport` / `BacktestSummary` 等 iQuant 自有 schema，对外屏蔽第三方库类型。
 
 职责：
 
@@ -260,6 +268,8 @@ features/
 - 生成理论交易。
 - 计算资金曲线和指标。
 - 保证无未来函数。
+
+显式不引入的第三方回测框架：vectorbt（AGPL）、backtrader（GPL/停滞）、backtesting.py（AGPL）、zipline-reloaded（A 股适配工作量大）。
 
 ### 5.5 packages/replay-engine
 

@@ -19,3 +19,4 @@
 - [ADR-0006 时序行情采用 PostgreSQL + TimescaleDB](ADR-0006-timescaledb-for-market-data.md)
 - [ADR-0007 异步任务采用 Celery](ADR-0007-celery-for-async-tasks.md)
 - [ADR-0008 模块化单体起步，按需服务化](ADR-0008-modular-monolith-first.md)
+- [ADR-0009 回测引擎自研边界与第三方库复用](ADR-0009-backtest-engine-boundary.md)

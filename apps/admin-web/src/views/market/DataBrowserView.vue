@@ -156,10 +156,10 @@ watch(period, loadBars)
               {{ selected ? `${selected.full_code} ${selected.name}` : '请选择标的' }}
             </span>
             <el-radio-group v-model="period" size="small">
-              <el-radio-button label="5m">5分</el-radio-button>
-              <el-radio-button label="30m">30分</el-radio-button>
-              <el-radio-button label="day">日线</el-radio-button>
-              <el-radio-button label="week">周线</el-radio-button>
+              <el-radio-button value="5m">5分</el-radio-button>
+              <el-radio-button value="30m">30分</el-radio-button>
+              <el-radio-button value="day">日线</el-radio-button>
+              <el-radio-button value="week">周线</el-radio-button>
             </el-radio-group>
           </div>
         </template>
