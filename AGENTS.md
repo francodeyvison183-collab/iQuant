@@ -81,7 +81,9 @@ apps/*     ──▶  services/*  ──▶  packages/*  ──▶  packages/dom
 | 前端 | Vue 3.5 + Vite 5 + Element Plus 2.8 + ECharts 5 |
 | 部署 | Docker Compose（MVP），后续按需上 K8s |
 
-新增第三方依赖前，对照 [`PYTHON_PROJECT_LAYOUT.md` §5.2](docs/architecture/PYTHON_PROJECT_LAYOUT.md) 的入选标准，并在 PR 描述里说明引入原因。
+**第三方依赖：有成熟库就用，重造轮子是愚蠢的。** 有利于稳定、简单、高效、易维护即可引入，写入对应 `pyproject.toml` 并更新 lock；详见 [`PYTHON_PROJECT_LAYOUT.md` §5](docs/architecture/PYTHON_PROJECT_LAYOUT.md)。PR 中一句话说明用途即可。
+
+**与 HQScanner 的关系**：二者为**独立项目**，禁止共享 Python 包、子模块依赖或双向 import；可参考其业务/协议做法，但所有代码与依赖必须落在本仓库内。
 
 ---
 
@@ -236,7 +238,7 @@ apps/*     ──▶  services/*  ──▶  packages/*  ──▶  packages/dom
 - [ ] 涉及表结构 → 已写 Alembic 迁移；迁移可向下回滚。
 - [ ] 涉及配置 → `.env.example` 已同步新键。
 - [ ] 涉及前端 API 调用 → `apps/admin-web/src/api/*.ts` 已更新。
-- [ ] 涉及新依赖 → `pyproject.toml` 已加，且在 PR 描述里说明原因。
+- [ ] 涉及新依赖 → `pyproject.toml` + lock 已更新；PR 中已简要说明用途（若有）。
 - [ ] 未引入"重启容器才能生效"的回归。
 - [ ] 未在代码里留无用注释 / 调试 print / TODO 而无追踪 issue。
 - [ ] 提交信息（如用户要求提交）符合现仓库风格（祈使句，中文 OK）。

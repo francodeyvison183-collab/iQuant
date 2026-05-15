@@ -29,9 +29,7 @@ function goto(path: string) {
         <el-menu-item-group>
           <template #title>行情数据</template>
           <el-menu-item index="/market/hosts">通达信主站</el-menu-item>
-          <el-menu-item index="/market/import">历史数据导入</el-menu-item>
-          <el-menu-item index="/market/tasks">任务进度</el-menu-item>
-          <el-menu-item index="/market/online">在线补数</el-menu-item>
+          <el-menu-item index="/market/data">行情数据</el-menu-item>
           <el-menu-item index="/market/browser">数据查看</el-menu-item>
         </el-menu-item-group>
       </el-menu>

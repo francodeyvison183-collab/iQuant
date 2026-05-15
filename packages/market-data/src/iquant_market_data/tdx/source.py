@@ -8,8 +8,9 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from iquant_domain.market import KlinePeriod, MarketBarBatch, Symbol
+from iquant_domain.market import KlinePeriod, MarketBarBatch, Market, Symbol
 
+from .a_share_list import list_a_share_stocks
 from .pool import TdxConnectionPool
 
 logger = logging.getLogger(__name__)
@@ -25,17 +26,22 @@ class TdxMarketDataSource:
 
     @property
     def pool(self) -> TdxConnectionPool:
-        """暴露底层连接池，供需要直接调度 ``TdxClient`` 同步方法的用例使用。"""
+        """暴露底层连接池，供需要直接调度 ``TdxClient``（pytdx）的用例使用。"""
         return self._pool
 
     async def list_symbols(self) -> list[Symbol]:
-        """在线列出所有标的。
-
-        MVP 暂不实现完整的 GetSecurityList 协议解析（数据量大、协议细节多）。
-        实际项目中标的清单来自本地 vipdoc 扫描结果 + 数据库 ``symbol`` 表，
-        在线源仅作为补充。这里返回空列表，调用方应改走本地扫描。
-        """
-        return []
+        """通过 pytdx ``get_security_list`` 拉取 A 股代码表。"""
+        rows = await self._pool.run_sync(list_a_share_stocks)
+        symbols: list[Symbol] = []
+        for fc, name in rows:
+            if len(fc) < 8:
+                continue
+            market = Market(fc[:2])
+            code = fc[2:]
+            symbols.append(
+                Symbol(code=code, market=market, name=name or code, asset_type="stock")
+            )
+        return symbols
 
     async def fetch_bars(
         self,
@@ -71,7 +77,15 @@ class TdxMarketDataSource:
 
     async def healthcheck(self) -> bool:
         try:
-            await self._pool.run_sync(lambda c: c.connected or (c.connect() or True))
+            def _ping(c: object) -> bool:
+                from .client import TdxClient
+
+                assert isinstance(c, TdxClient)
+                if not c.connected:
+                    c.connect()
+                return c.connected
+
+            await self._pool.run_sync(_ping)
             return True
         except Exception as exc:  # noqa: BLE001 - 健康检查兜底
             logger.warning("tdx_source_unhealthy", extra={"error": str(exc)})

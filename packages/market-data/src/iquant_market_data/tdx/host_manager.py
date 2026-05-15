@@ -2,7 +2,7 @@
 
 职责：
 - 维护可用主站列表（内置默认值 + 持久化覆盖）
-- 并发测速（TCP 连接 + TDX 握手）
+- 并发测速（经 pytdx 连接握手）
 - 按延迟选择最快主站，连续失败的非默认主站自动淘汰
 """
 from __future__ import annotations
@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import socket
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
@@ -18,7 +17,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# 内置默认主站列表（与 HQScanner 同源，长期可用的真实行情主站）
+# 内置默认主站列表（社区常用的真实行情主站）
 # 注意：7709/7708 为真实行情端口；7727 等扩展端口不提供 K 线。
 DEFAULT_HOSTS: list[dict[str, object]] = [
     {"ip": "110.41.147.114", "port": 7709, "name": "腾讯云北京1"},
@@ -28,9 +27,6 @@ DEFAULT_HOSTS: list[dict[str, object]] = [
     {"ip": "14.215.177.38", "port": 7709, "name": "广州主站2"},
     {"ip": "101.227.77.254", "port": 7709, "name": "上海主站1"},
 ]
-
-# 测速时使用第一个 setup 包；服务端若回包即视为协议握手成功
-_TDX_SETUP_PROBE = bytes.fromhex("0c0218930001030003000d0001")
 
 # 连续不可用超过该时长的非默认主站会被自动剔除
 _AUTO_PRUNE = timedelta(hours=24)
@@ -67,23 +63,19 @@ def _now_str() -> str:
 
 
 def _probe_host(ip: str, port: int, timeout: float = 5.0) -> tuple[bool, int]:
-    """同步测速：TCP 连接 + 一次握手包，返回 (ok, elapsed_ms)。"""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
+    """同步测速：经 pytdx 完成连接握手，返回 (ok, elapsed_ms)。"""
+    from .client import TdxClient
+
     start = time.perf_counter()
+    client = TdxClient(ip, port, connect_timeout=timeout, read_timeout=timeout)
     try:
-        sock.connect((ip, port))
-        sock.sendall(_TDX_SETUP_PROBE)
-        resp = sock.recv(64)
+        client.connect()
         elapsed = int((time.perf_counter() - start) * 1000)
-        return (bool(resp), elapsed) if resp else (False, 9999)
-    except OSError:
+        return True, elapsed
+    except Exception:  # noqa: BLE001
         return False, 9999
     finally:
-        try:
-            sock.close()
-        except OSError:
-            pass
+        client.close()
 
 
 @dataclass

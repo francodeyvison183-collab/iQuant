@@ -1,6 +1,6 @@
-"""TDX 连接池：同步 TCP 客户端 + asyncio 封装。
+"""TDX 连接池：pytdx 客户端 + asyncio 封装。
 
-对齐 ``HQScanner`` 的反封禁经验：
+在线批量拉取的反封禁运维策略（自适应并发、熔断、池级冷却；协议由 pytdx 负责）：
 - 并发上限与连接数与 ``AdaptiveConcurrency.maximum`` 一致，``max_size`` 钳制到 ≤8。
 - 全局冷却：连接连续失败 / 单页多次换线仍空 时进入 60s 窗口，避免 IP 被协同拉黑。
 - 区间分页拉取：首页按交易日粗估 ``count``；页间 ``0.25s``；单页空响应先 ``1.5s`` 原连接重试再换线。
@@ -20,6 +20,7 @@ from iquant_domain.errors import TdxGlobalCooldown, TdxHostUnavailable, TdxProto
 from iquant_domain.market import KlinePeriod, MarketBar, MarketBarBatch
 
 from .ban_diagnostic import log_ban_diagnostic, record_failure, record_request
+from .bar_range_filter import filter_bars_in_date_range
 from .client import TdxClient
 from .host_manager import TdxHost, TdxHostManager
 from .range_estimate import TDX_PAGE_SIZE, estimate_first_page_count
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-# 与 HQScanner ``_PYTDX_KLINE_*`` / ``tdx_batch_runner`` 对齐
+# 并发与冷却参数（见 batch_runner / 环境变量 IQUANT_TDX_POOL_SIZE）
 _POOL_HARD_CAP = 8
 _COOLDOWN_SECONDS = 60
 _CONNECT_FAIL_STREAK = 3
@@ -67,7 +68,7 @@ class TdxConnectionPool:
 
     @property
     def global_cooldown_until(self) -> float:
-        """供 ``run_tdx_batch`` 检测池级冷却（与 HQScanner 导出变量语义一致）。"""
+        """供 ``run_tdx_batch`` 检测池级冷却截止时间。"""
         return self._global_cooldown_until
 
     @property
@@ -185,15 +186,15 @@ class TdxConnectionPool:
         end: datetime | None = None,
         hard_max_bars: int = 20000,
     ) -> MarketBarBatch:
-        """按区间分页拉取 K 线（HQScanner ``fetch_kline_paged`` 策略的 iQuant 实现）。"""
-        end_dt = end if end is not None else datetime.now()
-        if start.tzinfo is not None or end_dt.tzinfo is not None:
-            start = start.replace(tzinfo=None)  # type: ignore[assignment]
-            end_dt = end_dt.replace(tzinfo=None)  # type: ignore[assignment]
+        """按区间分页拉取 K 线（首页估算 count + 向后翻页）。"""
+        end_dt = end
+        start_naive = start.replace(tzinfo=None) if start.tzinfo else start
+        end_naive = end_dt.replace(tzinfo=None) if end_dt and end_dt.tzinfo else end_dt
+        start = start_naive  # type: ignore[assignment]
+        end_dt = end_naive  # type: ignore[assignment]
 
-        first_page_count = estimate_first_page_count(period=period, start=start, end=end_dt)
+        first_page_count = estimate_first_page_count(period=period, start=start)
         all_bars: list[MarketBar] = []
-        seen: set[datetime] = set()
         offset = 0
         first_page = True
         loop = asyncio.get_running_loop()
@@ -261,13 +262,10 @@ class TdxConnectionPool:
 
             await self._note_page_ok()
 
-            new_added = 0
-            for bar in page_rows:
-                if bar.bar_time in seen:
-                    continue
-                seen.add(bar.bar_time)
-                all_bars.append(bar)
-                new_added += 1
+            # offset 增大表示向更早历史翻页；旧页必须 prepend（与 TdxClient.fetch_bars_in_range 一致）
+            before = len(all_bars)
+            all_bars[0:0] = page_rows
+            new_added = len(all_bars) - before
 
             oldest = min((b.bar_time for b in page_rows), default=None)
             newest = max((b.bar_time for b in page_rows), default=None)
@@ -284,7 +282,9 @@ class TdxConnectionPool:
             offset += page_count
             await asyncio.sleep(0.25 + random.random() * 0.05)
 
-        filtered = [b for b in all_bars if start <= b.bar_time <= end_dt]
+        filtered = filter_bars_in_date_range(
+            all_bars, period=period, start=start, end=end_dt
+        )
         filtered.sort(key=lambda b: b.bar_time)
         return MarketBarBatch(full_code=full_code, period=period, bars=filtered)
 
@@ -314,6 +314,10 @@ class TdxConnectionPool:
         host = hosts[self._round_robin % len(hosts)]
         self._round_robin += 1
         return host
+
+    def reload_hosts(self) -> None:
+        """重新读取主站配置（上传 connect.cfg 后 worker 内需调用）。"""
+        self._hm.load()
 
     async def close(self) -> None:
         while not self._idle.empty():

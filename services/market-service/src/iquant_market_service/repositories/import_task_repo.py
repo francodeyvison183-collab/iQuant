@@ -103,6 +103,21 @@ class ImportTaskRepo:
         if error_message:
             row.error_message = error_message[:2000]
 
+    async def reset(self, task_id: str) -> MarketImportTask | None:
+        """重置任务状态为 queued，清空进度，准备重跑。"""
+        row = await self.get(task_id)
+        if row is None:
+            return None
+        row.status = MarketImportTaskStatus.QUEUED.value
+        row.done_files = 0
+        row.imported_bars = 0
+        row.error_count = 0
+        row.error_message = None
+        row.started_at = None
+        row.finished_at = None
+        await self.s.flush()
+        return row
+
 
 class ImportStateRepo:
     """文件级导入状态。"""

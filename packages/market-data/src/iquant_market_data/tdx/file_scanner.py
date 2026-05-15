@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 from iquant_domain.market import KlinePeriod, Market
 
-from .codes import is_supported_code
+from .codes import is_a_share_stock_code, is_in_virtual_markets
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +51,13 @@ class TdxFileInfo:
         return (self.file_size, self.file_mtime)
 
 
-def scan_tdx_files(root_dir: str, *, periods: list[KlinePeriod] | None = None) -> list[TdxFileInfo]:
+def scan_tdx_files(root_dir: str, *, periods: list[KlinePeriod] | None = None, markets: list[str] | None = None) -> list[TdxFileInfo]:
     """扫描整个 vipdoc 目录。
 
     参数：
         root_dir: vipdoc 根目录的绝对路径
         periods: 只扫这些周期；None 表示扫描全部已实现的周期（day + 5m + 1m）
+        markets: 只扫这些市场（支持 sh/sz/bj/cyb/kcb）；None 表示全部
     """
     if not root_dir or not os.path.isdir(root_dir):
         logger.warning("tdx_vipdoc_missing", extra={"root_dir": root_dir})
@@ -89,7 +90,10 @@ def scan_tdx_files(root_dir: str, *, periods: list[KlinePeriod] | None = None) -
                     code = raw[2:]
                 else:
                     code = raw
-                if not is_supported_code(market, code):
+                if not is_a_share_stock_code(market, code):
+                    continue
+                full_code = f"{market.value}{code}"
+                if not is_in_virtual_markets(full_code, markets):
                     continue
                 try:
                     stat = entry.stat(follow_symlinks=False)
@@ -116,6 +120,7 @@ def scan_changed_files(
     *,
     state_map: Mapping[str, tuple[int, float]],
     periods: list[KlinePeriod] | None = None,
+    markets: list[str] | None = None,
 ) -> tuple[list[TdxFileInfo], list[TdxFileInfo]]:
     """与上次导入状态对比，区分变更/未变文件。
 
@@ -124,7 +129,7 @@ def scan_changed_files(
     返回：
         (changed, unchanged)
     """
-    all_files = scan_tdx_files(root_dir, periods=periods)
+    all_files = scan_tdx_files(root_dir, periods=periods, markets=markets)
     changed: list[TdxFileInfo] = []
     unchanged: list[TdxFileInfo] = []
     for fi in all_files:

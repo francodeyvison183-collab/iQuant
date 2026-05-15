@@ -1,10 +1,11 @@
 # 技术栈选型
 
-本文记录 iQuant 服务端的 Python 技术栈选型与版本基线。所有选型遵循三个原则：
+本文记录 iQuant 服务端的 Python 技术栈选型与版本基线。所有选型遵循四个原则：
 
 - **成熟优先**：选择社区活跃、长期维护、文档完善的方案。
+- **能用库就别造轮子**：有成熟稳定的第三方依赖能**简洁、优雅**地解决问题时，**大胆引入**；重复实现协议、指标、编解码等通用能力是浪费且易出错（行情在线层已采用 `pytdx`，见 [`market-data.md`](modules/market-data.md)）。
 - **异步优先**：I/O 密集型路径优先选择原生 async/await 支持的组件。
-- **可替换**：通过包层抽象隔离第三方组件，避免基础设施反向污染业务代码。
+- **可替换**：通过包层抽象隔离第三方组件，避免基础设施反向污染业务代码；引入/替换库走 ADR 或 PR 说明即可，不设额外审批门槛（见 [`PYTHON_PROJECT_LAYOUT.md` §5](PYTHON_PROJECT_LAYOUT.md#5-依赖管理)）。
 
 ## 1. 运行时
 
@@ -77,14 +78,13 @@ FastAPI 选型理由记录于 [ADR-0005](../decisions/ADR-0005-fastapi-as-web-fr
 | 数据结构 | NumPy + Pandas | 通用计算基线 |
 | 高性能数据帧 | Polars | 大批量行情扫描、特征提取场景使用 |
 | 技术指标 | TA-Lib + pandas-ta | TA-Lib 优先（C 实现），pandas-ta 兜底纯 Python 指标 |
-| 加速 | Numba（按需） | 仅在已识别的热点路径使用，避免无意义引入 |
-| DSL 求值 + 成交撮合 | 自研（`packages/backtest-engine` 内 `evaluator/`、`execution/`、`invariants/`） | 与盲测/诊断模块共享同一求值器；A 股 T+1、涨跌停、停牌、复权与"无未来函数"不变式由此层保证 |
-| 收益风险指标 | empyrical-reloaded（必选）+ quantstats（可选） | 仅在 `packages/backtest-engine/metrics/` 内调用，对外只暴露 iQuant 自有 schema |
+| 加速 | Numba（按需） | 热点路径可用；成熟方案优先 |
+| DSL 求值 + 成交撮合 | `packages/backtest-engine`（`evaluator/`、`execution/`、`invariants/`） | **产品特异性**：须与盲测/诊断共享逐 bar 求值轨迹，不宜用「仅 signal-in → metric-out」的通用回测框架整体替代 |
+| 收益风险指标 | empyrical-reloaded（必选）+ quantstats（可选） | 标准指标不手写；在 `metrics/` 内封装，对外只暴露 iQuant schema |
+| 在线行情协议 | pytdx | 不自研 TDX TCP 编解码 |
 | K 线存储格式 | Parquet | 离线分析与冷数据存储用 |
 
-回测引擎的自研/复用边界详见 [ADR-0009](../decisions/ADR-0009-backtest-engine-boundary.md)。
-
-**显式不引入的第三方回测框架**：vectorbt（AGPL-3.0，SaaS 合规风险）、vectorbt PRO（按席位商业授权）、backtrader（GPL，且项目停滞）、backtesting.py（AGPL）、zipline-reloaded（license 安全但 A 股适配工作量大、社区稀薄）。核心理由：上述框架是 signal-in/metric-out 接口，无法承载盲测与诊断模块所需的逐 bar 求值轨迹，使用它们会被迫维护两套必须永远一致的信号生成器。
+回测「哪些必须自建、哪些应用库」见 [ADR-0009](../decisions/ADR-0009-backtest-engine-boundary.md)。**当前未把 vectorbt / backtrader 等作为回测主引擎**，主因是架构契约（逐 bar DSL 轨迹），不是「排斥第三方」；若未来有库能同时满足契约与合规，可通过 ADR 替换。
 
 ## 7. AI 与外部模型
 
@@ -92,7 +92,7 @@ FastAPI 选型理由记录于 [ADR-0005](../decisions/ADR-0005-fastapi-as-web-fr
 | --- | --- | --- |
 | 大模型供应商 | OpenAI / Anthropic / 阿里通义 / DeepSeek | 通过统一 `ai-assistant` 抽象层，避免业务代码绑定供应商 |
 | Prompt 管理 | 仓库内 `packages/ai-assistant/prompts` | 模板版本化、可追溯 |
-| 调用编排 | 自研轻量层 + 必要时引入 LangChain 局部能力 | 避免被 LangChain 全栈绑定 |
+| 调用编排 | 轻量自研 + 按需引入 LangChain 等成熟编排库 | 以解决问题为准，避免为「不依赖」而手写全套编排 |
 | 结构化输出 | Pydantic v2 + JSON Schema 强约束 | AI 必须返回结构化结果，否则视为失败 |
 | 内容审核 | 微信小程序内容安全 API + 自研敏感词 | 用户输入与 AI 输出双向审核 |
 
@@ -145,18 +145,20 @@ AI 模型不直接生成交易信号，约束见 [ADR-0003](../decisions/ADR-000
 | 推送 | 服务端 → 微信订阅消息 | MVP 不引入第三方推送 |
 | 客服与反馈 | 小程序客服 + 内置反馈表单 | MVP 阶段足够 |
 
-## 12. 不引入的技术（显式排除）
+## 12. MVP 阶段暂未选用的技术（可随需求变更）
 
-为减少团队负担，以下技术在 MVP 阶段显式不引入：
+以下为**当前**取舍，不是永久禁令；有更合适的成熟方案时，通过 ADR 或 PR 说明即可引入。
 
-- Django / Flask：不再选用（用 FastAPI）。
-- MongoDB / Cassandra：业务结构强相关，PostgreSQL 已满足。
-- Kafka：MVP 流量未到，Redis 即可；RabbitMQ 也需要有明确队列瓶颈后再引入。
-- Spark / Flink：批处理体量未到。
-- LangChain Agents 全套：依赖过重，仅按需借用局部工具。
-- 自研行情爬虫：MVP 用合规数据供应商或本地导入。
+| 技术 | 当前未选原因 |
+| --- | --- |
+| Django / Flask | 已统一 FastAPI |
+| MongoDB / Cassandra | 关系型 + TimescaleDB 已覆盖 |
+| Kafka | 流量未到，Redis/Celery 足够 |
+| Spark / Flink | 批处理体量未到 |
+| 自研行情 TCP 协议 | 已用 **pytdx** |
+| 自研行情爬虫 | MVP 用本地 vipdoc + 在线补数 |
 
-引入新技术必须先提 ADR。
+**不因「少依赖」而拒绝成熟库**；仅当引入后明显损害可维护性、或与架构契约冲突时再记录排除理由。
 
 ## 13. 版本升级策略
 

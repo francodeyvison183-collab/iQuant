@@ -1,4 +1,4 @@
-"""TDX 封禁/熔断时输出的聚合诊断日志（对齐 HQScanner ``_log_ban_diagnostic`` 思路）。"""
+"""TDX 封禁/熔断时输出的聚合诊断日志。"""
 from __future__ import annotations
 
 import json

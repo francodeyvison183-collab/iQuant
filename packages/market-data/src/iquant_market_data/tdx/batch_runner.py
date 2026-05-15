@@ -1,6 +1,6 @@
-"""TDX 批次任务调度：对齐 ``HQScanner.app.services.tdx_batch_runner``。
+"""TDX 批次任务调度：自适应并发与熔断。
 
-核心：自适应并发、批次级熔断、与连接池全局冷却联动。常量数值与 HQScanner v3 压测结论一致，
+核心：自适应并发、批次级熔断、与连接池全局冷却联动。常量来自 TDX 批量拉取压测，
 修改前请阅读 ``docs/architecture/modules/market-data.md`` 反封禁章节。
 """
 from __future__ import annotations
@@ -120,7 +120,7 @@ def _pool_cooldown_tick(
     return changed, remain, cd_until
 
 
-async def run_tdx_batch(  # noqa: PLR0915 - 与 HQScanner 对齐的显式状态机
+async def run_tdx_batch(  # noqa: PLR0915
     items: Sequence[T],
     process_one: Callable[[T], Awaitable[bool | None]],
     *,

@@ -235,26 +235,36 @@ packages/domain/
 
 ## 5. 依赖管理
 
-### 5.1 依赖分层
+**原则：不作茧自缚；重造轮子是愚蠢的。** 只要有利于项目**稳定、简单、高效、易维护**，就**大胆引入**成熟的第三方库。不为「依赖少」而重复实现协议、指标、编解码等通用能力。不设 stars 数、许可证类型等额外门槛——合规与安全见 [`SECURITY_AND_COMPLIANCE.md`](SECURITY_AND_COMPLIANCE.md)；仅 `packages/domain` 与模块单向依赖等**架构**约束见下文。
 
-- 应用依赖只放在 `apps/*` 与 `services/*`。
-- `packages/*` 依赖必须最小化：除非真的需要，不引入大型框架。
-- 共用基础依赖（pydantic、structlog 等）由 workspace 根 lock 文件统一锁定。
+### 5.1 依赖分层（结构约束，非「少依赖」）
 
-### 5.2 第三方依赖入选标准
+- 应用依赖放在 `apps/*` 与 `services/*`；可复用能力放在 `packages/*`。
+- `packages/domain` 保持纯领域模型，**不依赖**其他业务包（避免循环与泄漏）；其余 `packages/*` 可按需引入第三方库。
+- 版本由 workspace 根 `uv.lock` 统一锁定；新增依赖写入对应成员的 `pyproject.toml`，禁止只在环境里 `pip install` 却不入库。
 
-- 是否社区主流（>1k stars、活跃维护）。
-- 是否纯 Python 或常用平台均有 wheel。
-- 许可证是否允许商用（MIT / Apache-2.0 / BSD 优先；GPL/AGPL 需评估）。
-- 是否会扩散到 `packages/domain`（如会则慎用）。
+### 5.2 引入第三方库时怎么做
 
-引入新依赖必须在 PR 描述里说明原因并标注是否替代已有依赖。
+1. 在对应包的 `pyproject.toml` 声明依赖，执行 `uv lock` / `uv sync`。
+2. PR 中一句话说明：**解决什么问题**、是否替代自研/旧库（便于审阅，不是审批关卡）。
+3. 避免无意的重复：同一职责不要长期并存两个等价库（例如 requests 与 httpx 二选一），除非迁移过渡期有明确计划。
 
-### 5.3 禁止
+**示例**（`packages/market-data`）：
 
-- `pip install` 临时依赖不写入 `pyproject.toml`。
-- 引入仅在小众场景能用、长尾维护的"魔法库"。
-- 同一职能引入多个等价库（如同时用 requests + httpx）。
+| 包 | 用途 |
+| --- | --- |
+| `pytdx` | 通达信在线行情（K 线、证券列表）；替代自研协议层 |
+| `exchange-calendars` | A 股交易日（XSHG） |
+
+### 5.4 与其它仓库
+
+- **禁止**与 HQScanner 等外部项目建立包级耦合（共享 wheel、git submodule、路径依赖）。
+- 允许阅读外部实现作参考；落地代码必须在本 workspace 内可构建、可测试。
+
+### 5.3 仍须遵守的底线
+
+- 依赖必须进入 `pyproject.toml` 并纳入 lock 文件，保证可复现构建。
+- 不破坏 [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) 的单向依赖（`apps → services → packages → domain`）。
 
 ## 6. 类型与静态检查
 

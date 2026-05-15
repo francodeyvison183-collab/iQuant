@@ -2,7 +2,7 @@
 
 为了让前端 admin-web 开箱即用，路由统一挂在 ``/api/v1/admin/market/*``，
 所有响应使用 ``{"code": 0, "data": ..., "message": ...}`` 风格，
-与 HQScanner / pure-admin 模板的前端约定保持一致。
+与 admin-web（pure-admin 模板）的前端约定保持一致。
 """
 from __future__ import annotations
 
@@ -12,7 +12,9 @@ import logging
 from datetime import datetime
 from typing import AsyncIterator
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from pathlib import Path
+
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -115,12 +117,35 @@ async def api_import_hosts_cfg(
 
 class ScanPreviewIn(BaseModel):
     vipdoc_dir: str | None = None
+    markets: list[str] | None = None
 
 
 @router.post("/scan/preview")
 async def api_scan_preview(payload: ScanPreviewIn) -> dict:
-    result = await scan_local_preview(vipdoc_dir=payload.vipdoc_dir)
+    result = await scan_local_preview(vipdoc_dir=payload.vipdoc_dir, markets=payload.markets)
     return {"code": 0, "data": result.model_dump()}
+
+
+@router.post("/upload-vipdoc")
+async def api_upload_vipdoc(
+    upload_id: str = Form(...),
+    file_paths: str = Form(...),
+    files: list[UploadFile] = File(...),
+) -> dict:
+    paths = json.loads(file_paths)
+    if len(paths) != len(files):
+        raise HTTPException(status_code=400, detail="paths and files length mismatch")
+    
+    base_dir = Path("storage/local/uploads") / f"vipdoc_{upload_id}"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    
+    for path, file_obj in zip(paths, files):
+        dest = base_dir / path.lstrip("/")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        content = await file_obj.read()
+        dest.write_bytes(content)
+        
+    return {"code": 0, "data": {"vipdoc_dir": str(base_dir.absolute())}}
 
 
 # ─── 导入任务 ──────────────────────────────────────────────────────────────────
@@ -129,6 +154,7 @@ async def api_scan_preview(payload: ScanPreviewIn) -> dict:
 class CreateImportTaskIn(BaseModel):
     task_type: MarketImportTaskType = MarketImportTaskType.INCREMENTAL
     vipdoc_dir: str | None = None
+    markets: list[str] | None = None
 
 
 @router.post("/import-tasks")
@@ -136,17 +162,23 @@ async def api_create_import_task(payload: CreateImportTaskIn) -> dict:
     ref = await enqueue_import_task(
         task_type=payload.task_type,
         vipdoc_dir=payload.vipdoc_dir,
+        markets=payload.markets,
         enqueuer=enqueue_market_import,
     )
     return {"code": 0, "data": ref.model_dump()}
 
 
 def _task_to_dict(row) -> dict:  # type: ignore[no-untyped-def]
+    params = row.params or {}
     return {
         "task_id": row.task_id,
         "task_type": row.task_type,
         "status": row.status,
-        "params": row.params,
+        "params": params,
+        "code_count": params.get("code_count")
+        or (row.total_files // len(params["periods"]) if params.get("periods") and row.total_files else 0),
+        "markets": params.get("markets"),
+        "periods": params.get("periods"),
         "total_files": row.total_files,
         "done_files": row.done_files,
         "imported_bars": row.imported_bars,
@@ -176,6 +208,24 @@ async def api_get_import_task(task_id: str) -> dict:
     if row is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     return {"code": 0, "data": _task_to_dict(row)}
+
+
+@router.post("/import-tasks/{task_id}/retry")
+async def api_retry_import_task(task_id: str) -> dict:
+    async with pg_session() as s:
+        repo = ImportTaskRepo(s)
+        task = await repo.reset(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        await s.commit()
+
+        if task.task_type in (MarketImportTaskType.INCREMENTAL, MarketImportTaskType.FULL):
+            enqueue_market_import(task_id)
+        elif task.task_type == MarketImportTaskType.ONLINE_BATCH:
+            enqueue_online_batch(task_id)
+
+    return {"code": 0, "message": "任务已重新入队"}
 
 
 @router.get("/import-tasks/{task_id}/progress")
@@ -228,14 +278,14 @@ async def api_online_fetch(payload: OnlineFetchIn) -> dict:
 class OnlineBatchIn(BaseModel):
     """在线批量更新入参。
 
-    - ``markets``：市场列表；``codes`` 都为空时，按 ``markets`` 从 ``symbol`` 表枚举代码。
+    - ``markets``：市场列表；``codes`` 为空时经 pytdx 拉全 A 股列表再按市场筛选。
     - ``codes``：显式标的列表（``sh600519`` 形式），优先级高于 ``markets``。
     - ``periods``：周期列表，至少 1 个；MVP 支持 5m/30m/day/week 等。
     - ``start_date``：必填，``YYYY-MM-DD`` 或 ISO 时间字符串。
     - ``end_date``：可选；省略表示到今天。
     """
 
-    markets: list[Market] | None = None
+    markets: list[str] | None = None
     codes: list[str] | None = None
     periods: list[KlinePeriod] = Field(default_factory=list)
     start_date: str

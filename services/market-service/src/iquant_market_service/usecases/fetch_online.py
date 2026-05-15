@@ -34,6 +34,14 @@ def _ensure_source() -> TdxMarketDataSource:
     return _source
 
 
+def reload_tdx_source() -> TdxMarketDataSource:
+    """丢弃进程内缓存的连接池，使批量任务重新加载主站列表。"""
+    global _pool, _source
+    _pool = None
+    _source = None
+    return _ensure_source()
+
+
 async def fetch_and_save_online(
     *,
     full_code: str,

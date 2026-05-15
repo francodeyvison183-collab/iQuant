@@ -14,28 +14,18 @@ export const router = createRouter({
       component: () => import('./views/market/TdxHostsView.vue'),
     },
     {
-      path: '/market/import',
-      name: 'market-import',
-      meta: { title: '历史数据导入' },
-      component: () => import('./views/market/ImportView.vue'),
+      path: '/market/data',
+      name: 'market-data',
+      meta: { title: '行情数据' },
+      component: () => import('./views/market/MarketDataView.vue'),
     },
-    {
-      path: '/market/tasks',
-      name: 'market-tasks',
-      meta: { title: '任务进度' },
-      component: () => import('./views/market/TasksView.vue'),
-    },
+
     {
       path: '/market/browser',
       name: 'market-browser',
       meta: { title: '数据查看' },
       component: () => import('./views/market/DataBrowserView.vue'),
     },
-    {
-      path: '/market/online',
-      name: 'market-online',
-      meta: { title: '在线补数' },
-      component: () => import('./views/market/OnlineFetchView.vue'),
-    },
+
   ],
 })

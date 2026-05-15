@@ -5,7 +5,7 @@
 * ``.day``  日 K
     ``int32 date | int32 open | int32 high | int32 low | int32 close | float32 amount | int32 volume | int32 reserved``
     日期编码：``yyyymmdd``，价格单位为分（除以 100 还原）。
-* ``.lc5``  5 分钟 K
+* ``.lc5``  5 分钟 K / ``.lc1`` 1 分钟 K（同布局）
     ``uint16 date_enc | uint16 time_enc | float32 open | float32 high | float32 low | float32 close | float32 amount | int32 volume | int32 reserved``
     日期编码：``date_enc = ((year - 2004) << 11) | (month * 100 + day)``，时间编码：``hour * 60 + minute``。
 """
@@ -82,6 +82,22 @@ def parse_day_file(
         )
 
 
+def parse_lc1_file(
+    file_path: str,
+    *,
+    full_code: str,
+    record_offset: int = 0,
+) -> Iterator[MarketBar]:
+    """流式解析 .lc1 文件（1 分钟 K，布局与 .lc5 相同）。"""
+    yield from _parse_intraday_file(
+        file_path,
+        full_code=full_code,
+        period=KlinePeriod.MIN_1,
+        record_offset=record_offset,
+        log_tag="tdx_lc1_read_failed",
+    )
+
+
 def parse_lc5_file(
     file_path: str,
     *,
@@ -89,13 +105,30 @@ def parse_lc5_file(
     record_offset: int = 0,
 ) -> Iterator[MarketBar]:
     """流式解析 .lc5 文件（5 分钟 K）。"""
+    yield from _parse_intraday_file(
+        file_path,
+        full_code=full_code,
+        period=KlinePeriod.MIN_5,
+        record_offset=record_offset,
+        log_tag="tdx_lc5_read_failed",
+    )
+
+
+def _parse_intraday_file(
+    file_path: str,
+    *,
+    full_code: str,
+    period: KlinePeriod,
+    record_offset: int,
+    log_tag: str,
+) -> Iterator[MarketBar]:
     try:
         with open(file_path, "rb") as f:
             if record_offset > 0:
                 f.seek(record_offset * RECORD_SIZE)
             buf = f.read()
     except OSError as exc:
-        logger.error("tdx_lc5_read_failed", extra={"file": file_path, "error": str(exc)})
+        logger.error(log_tag, extra={"file": file_path, "error": str(exc)})
         return
 
     n = len(buf) // RECORD_SIZE
@@ -127,7 +160,7 @@ def parse_lc5_file(
             continue
         yield MarketBar(
             full_code=full_code,
-            period=KlinePeriod.MIN_5,
+            period=period,
             bar_time=bar_time,
             open=Decimal(str(round(float(raw_open), 3))),
             high=Decimal(str(round(float(raw_high), 3))),

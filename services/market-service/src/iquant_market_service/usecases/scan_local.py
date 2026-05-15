@@ -12,7 +12,7 @@ from ..repositories.import_task_repo import ImportStateRepo
 from .schemas import ScanPreviewResult
 
 
-async def scan_local_preview(*, vipdoc_dir: str | None = None) -> ScanPreviewResult:
+async def scan_local_preview(*, vipdoc_dir: str | None = None, markets: list[str] | None = None) -> ScanPreviewResult:
     """预览本地 TDX 文件扫描结果，不写入任何数据。"""
     s = get_market_settings()
     data_dir = (vipdoc_dir or s.tdx_vipdoc_dir).strip()
@@ -26,7 +26,7 @@ async def scan_local_preview(*, vipdoc_dir: str | None = None) -> ScanPreviewRes
             unchanged_files=0,
         )
 
-    files = scan_tdx_files(data_dir)
+    files = scan_tdx_files(data_dir, markets=markets)
     by_period: dict[str, int] = defaultdict(int)
     by_market: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for f in files:

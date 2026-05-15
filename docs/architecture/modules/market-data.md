@@ -16,7 +16,7 @@
 | 层 | 位置 | 职责 |
 | --- | --- | --- |
 | 领域模型 | `packages/domain` | `Symbol`、`MarketBar`、`MarketBarBatch`、`KlinePeriod`、`Market` |
-| 协议与适配器 | `packages/market-data` | TDX TCP 客户端、主站管理、连接池、本地文件扫描/解析、`MarketDataSource` 抽象 |
+| 协议与适配器 | `packages/market-data` | **pytdx** 在线行情、主站管理、连接池、本地文件扫描/解析、`MarketDataSource` 抽象 |
 | 业务用例 | `services/market-service` | ORM、仓储、用例（扫描、导入、查询、在线拉取、主站维护）、进度总线 |
 | 应用入口 | `apps/api` | REST 路由（`/api/v1/admin/market/*`）、SSE 进度流 |
 | 异步执行 | `apps/worker` | Celery 任务：`market.import_local`、`market.online_batch`、`market.test_hosts` |
@@ -43,28 +43,33 @@ ImportStateRepo.upsert（按文件记录 size/mtime/已导入记录数）
 
 - 全量：忽略状态，重导所有文件（``ON CONFLICT DO NOTHING`` 自然去重）。
 - 增量：与 ``market_import_state`` 表比对 size+mtime；变更文件的 ``record_offset`` 跳到上次已导入条数继续追加。
+- 支持周期：日线 ``.day``、5 分钟 ``.lc5``、1 分钟 ``.lc1``（同 32 字节 intraday 布局）。
 
-### 3.2 在线 TDX 协议
+### 3.2 在线 TDX 协议（pytdx）
+
+在线行情 **不再自研 TCP 编解码**，统一经成熟库 **[pytdx](https://github.com/rainx/pytdx)**：
 
 ```
-TdxConnectionPool → TdxClient（带握手与差分解码） → MarketBarBatch → bulk_upsert
+TdxConnectionPool → TdxClient（薄封装 pytdx.hq.TdxHq_API） → pytdx_convert → MarketBarBatch → bulk_upsert
         ↑
 TdxHostManager（连接池按主站轮询，分散压力）
 ```
 
-- 单次请求最多约 800 根；``fetch_bars_paged`` 按「最近 N 根」分页；单标的区间拉取仍可用 ``TdxClient.fetch_bars_in_range``（简单实现）。
-- **批量在线更新**（``/admin/market/online/batch``）走 ``TdxConnectionPool.fetch_bars_in_range_resilient`` + ``tdx/batch_runner.run_tdx_batch``，**完整继承 HQScanner 实战参数**：
-  - 连接池 ``max_size`` 与环境变量 ``IQUANT_TDX_POOL_SIZE`` **硬钳制 ≤8**（v2 验证 >8 易触发多主站协同封禁）。
-  - 首页 ``count`` 按区间粗估交易日 × 周期每日 bar 数（不足再翻 800 满页），减少固定拉满 800 的浪费。
-  - 分页间隔 **0.25s** + 微抖动；单页空响应：**先原连接 sleep 1.5s 重试**，再关闭连接换主站（最多 3 轮连接尝试），与 HQScanner ``_one_page`` 一致。
-  - **池级全局冷却**：连接连续失败 3 次 / 单页多次换线仍空 3 次 → **60s** 内拒绝新建连接，并输出 ``[TDX-BAN-DIAG]`` 聚合日志（字段设计对齐 HQScanner）。
-  - **批次级自适应并发**：初始 4、上限 min(8, 池上限)、下限 2；连续 200 次「单组合成功」升一档；批次连续 8 次失败 **熔断 60s** 并收缩并发；并与池 ``global_cooldown_until`` 联动暂停（对齐 ``tdx_batch_runner.py``）。
+- ``TdxClient`` 负责连接/断开、调用 ``get_security_bars`` / ``get_security_list`` / ``get_security_count``，并将 pytdx dict 转为 ``iquant_domain.MarketBar``（``pytdx_convert.py``）。
+- 单次请求最多约 800 根；``fetch_bars_paged`` 按「最近 N 根」分页；单标的区间拉取可用 ``TdxClient.fetch_bars_in_range``。
+- **批量在线更新**（``/admin/market/online/batch``）走 ``TdxConnectionPool.fetch_bars_in_range_resilient`` + ``tdx/batch_runner.run_tdx_batch``：
+  - 连接池 ``max_size`` 与环境变量 ``IQUANT_TDX_POOL_SIZE`` **硬钳制 ≤8**（压测结论：>8 易触发多主站协同封禁）。
+  - 首页 ``count`` 按 **``exchange-calendars``（XSHG）** 统计区间交易日 × 周期每日 bar 数（不足再翻 800 满页），减少固定拉满 800 的浪费。
+  - 分页间隔 **0.25s** + 微抖动；单页空响应：**先原连接 sleep 1.5s 重试**，再关闭连接换主站（最多 3 轮连接尝试）。
+  - **池级全局冷却**：连接连续失败 3 次 / 单页多次换线仍空 3 次 → **60s** 内拒绝新建连接，并输出 ``[TDX-BAN-DIAG]`` 聚合日志。
+  - **批次级自适应并发**：初始 4、上限 min(8, 池上限)、下限 2；连续 200 次「单组合成功」升一档；批次连续 8 次失败 **熔断 60s** 并收缩并发；并与池 ``global_cooldown_until`` 联动暂停。
   - 冷却期内抛出 ``TdxGlobalCooldown``，避免在 IP 已被限速时空转重试。
 - 协议错误/超时：关闭当次连接，下一协程从池中取用其他主站。
 - 提供两种使用方式：
   - **单标的补数**：``/admin/market/online/fetch`` 同步拉取并入库，适合点位补缺（仍走 ``TdxMarketDataSource.fetch_bars`` / ``run_sync_with_retry``，非分页抗封禁全量）。
   - **按市场/日期范围批量更新**：``/admin/market/online/batch`` 排队为 Celery 任务，``execute_batch_online_task`` 在 worker 内按 ``(代码 × 周期)`` 调度，进度通过 SSE 推送。
-- 标的来源：批量任务默认从 ``symbol`` 表按 ``markets`` 列出代码；用户也可显式传入 ``codes`` 覆盖。
+- 标的来源：未指定 ``codes`` 时，经 pytdx ``get_security_list`` 拉全 A 股代码表（``a_share_list.py``，按常见股票前缀过滤），再按 ``markets``（含 ``cyb``/``kcb`` 虚拟市场）筛选；用户也可显式传入 ``codes`` 覆盖。
+- 主站测速经 **pytdx 连接**完成，不再维护独立 TCP 握手包。
 
 ### 3.3 通达信主站接入
 
@@ -156,8 +161,7 @@ TdxHostManager（连接池按主站轮询，分散压力）
 
 ## 10. 待办（后续迭代）
 
-- 完善 `MarketDataSource.list_symbols`：基于 TDX `GetSecurityList` 协议解析所有标的元数据。
-- 加入 1m / 15m / 30m / 60m 等本地文件类型解析（pytdx 已有先例，按需扩展）。
+- 本地 15m / 30m / 60m 等 vipdoc 格式（若需要）；在线侧已由 pytdx 覆盖。
 - 引入 ``Symbol.name`` 维护任务（从行情或新浪/东方财富批量回填名称）。
 - 增加复权因子表与回算流水。
 - 接入 OpenTelemetry / Prometheus 指标（任务速率、解析耗时、文件大小分布）。

@@ -16,7 +16,21 @@ export const http: AxiosInstance = axios.create({
 
 http.interceptors.response.use(
   (resp) => resp,
-  (err) => {
+  async (err) => {
+    const config = err.config
+    const status = err?.response?.status
+
+    // 503 自动重试：最多 3 次，指数退避
+    if (status === 503 && config && !config.__retryCount) {
+      config.__retryCount = 0
+    }
+    if (status === 503 && config && config.__retryCount < 3) {
+      config.__retryCount += 1
+      const delay = 1000 * Math.pow(2, config.__retryCount - 1)
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      return http(config)
+    }
+
     const detail = err?.response?.data?.error?.message
       || err?.response?.data?.detail
       || err?.message

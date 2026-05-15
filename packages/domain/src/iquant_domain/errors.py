@@ -47,7 +47,7 @@ class TdxHostUnavailable(MarketDataError):
 class TdxGlobalCooldown(MarketDataError):
     """TDX 全局限速/封禁保护：冷却窗口内禁止新建连接，避免 IP 被协同拉黑。
 
-    与 HQScanner ``_PYTDX_KLINE_GLOBAL_COOLDOWN_UNTIL`` 语义对齐，供批次任务与连接池协同。
+    供批次任务与连接池协同：冷却期内拒绝新建 TDX 连接。
     """
 
     code = "TDX_GLOBAL_COOLDOWN"

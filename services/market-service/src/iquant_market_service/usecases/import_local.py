@@ -16,6 +16,7 @@ from iquant_market_data.tdx.codes import split_full_code
 from iquant_market_data.tdx.file_parser import (
     get_record_count,
     parse_day_file,
+    parse_lc1_file,
     parse_lc5_file,
 )
 from iquant_market_data.tdx.file_scanner import scan_changed_files
@@ -37,11 +38,15 @@ async def enqueue_import_task(
     *,
     task_type: MarketImportTaskType,
     vipdoc_dir: str | None = None,
+    markets: list[str] | None = None,
     enqueuer: Callable[[str], None],
 ) -> ImportTaskRef:
     """创建导入任务并投递到 Celery。enqueuer 由 API 层注入，避免服务层依赖 Celery 实例。"""
     task_id = uuid.uuid4().hex
-    params = {"vipdoc_dir": vipdoc_dir or get_market_settings().tdx_vipdoc_dir}
+    params = {
+        "vipdoc_dir": vipdoc_dir or get_market_settings().tdx_vipdoc_dir,
+        "markets": markets,
+    }
     async with pg_session() as s:
         await ImportTaskRepo(s).create(
             task_id=task_id, task_type=task_type, params=params
@@ -64,7 +69,9 @@ async def execute_import_task(
         if task is None:
             raise ValueError(f"任务不存在: {task_id}")
         task_type = MarketImportTaskType(task.task_type)
-        vipdoc_dir = (task.params or {}).get("vipdoc_dir") or s.tdx_vipdoc_dir
+        params = task.params or {}
+        vipdoc_dir = params.get("vipdoc_dir") or s.tdx_vipdoc_dir
+        markets = params.get("markets")
         await ImportTaskRepo(ses).mark_running(task_id)
         await ses.commit()
 
@@ -78,11 +85,12 @@ async def execute_import_task(
     if task_type == MarketImportTaskType.FULL:
         from iquant_market_data.tdx.file_scanner import scan_tdx_files
 
-        files = scan_tdx_files(vipdoc_dir)
+        files = scan_tdx_files(vipdoc_dir, markets=markets)
     else:
         changed, _unchanged = scan_changed_files(
             vipdoc_dir,
             state_map={k: (v[0], v[1]) for k, v in state_map.items()},
+            markets=markets,
         )
         files = changed
 
@@ -98,6 +106,7 @@ async def execute_import_task(
     imported_bars = 0
     error_count = 0
     done_files = 0
+    recent_imported = []
 
     for fi in files:
         try:
@@ -108,14 +117,23 @@ async def execute_import_task(
                 bars = list(parse_day_file(fi.file_path, full_code=fi.full_code, record_offset=offset))
             elif fi.period == KlinePeriod.MIN_5:
                 bars = list(parse_lc5_file(fi.file_path, full_code=fi.full_code, record_offset=offset))
+            elif fi.period == KlinePeriod.MIN_1:
+                bars = list(parse_lc1_file(fi.file_path, full_code=fi.full_code, record_offset=offset))
             else:
                 bars = []
 
+            inserted = 0
             if bars:
                 async with ts_session() as ts:
                     inserted = await MarketBarRepo(ts).bulk_upsert(bars, source="tdx-file")
                     await ts.commit()
                 imported_bars += inserted
+
+            recent_imported.append({
+                "full_code": fi.full_code,
+                "period": fi.period.value,
+                "inserted": inserted,
+            })
 
             last_bar_time = bars[-1].bar_time if bars else None
 
@@ -156,8 +174,10 @@ async def execute_import_task(
                         "done_files": done_files,
                         "imported_bars": imported_bars,
                         "error_count": error_count,
+                        "recent_imported": recent_imported,
                     },
                 )
+            recent_imported = []
 
     # 3) 收尾
     async with pg_session() as ses:

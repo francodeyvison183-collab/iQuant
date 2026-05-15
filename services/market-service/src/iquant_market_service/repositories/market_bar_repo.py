@@ -53,8 +53,13 @@ class MarketBarRepo:
                 index_elements=[MarketBarORM.full_code, MarketBarORM.period, MarketBarORM.bar_time]
             )
             result = await self.s.execute(stmt)
-            # rowcount: 实际写入数（PG 支持），失败回退用 len(chunk)
-            inserted += int(result.rowcount or len(chunk))
+            # rowcount: 实际写入数（PG 支持），失败回退用 len(chunk) 
+            # 注意：ON CONFLICT DO NOTHING 时 rowcount 可能为 0，不能直接 or len(chunk)
+            rc = result.rowcount
+            if rc is None or rc == -1:
+                inserted += len(chunk)
+            else:
+                inserted += int(rc)
         return inserted
 
     async def get_last_bar_time(

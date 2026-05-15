@@ -29,7 +29,7 @@
 为兼容上述两类写法，解析器先尝试聚合 ``HostName/IPAddress/Port`` 三元组，
 若一个分组段里没有抽出任何主机，再退回到逐行正则兜底。
 
-参考实现：``HQScanner.app.services.tdx_host_service.parse_connect_cfg``。
+实现参考通达信 ``connect.cfg`` 常见格式与社区解析惯例。
 """
 from __future__ import annotations
 

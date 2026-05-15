@@ -101,12 +101,26 @@ export async function importHostsCfg(
 }
 
 // ── 扫描 / 导入 ──────────────────────────────────────────────────────────────
-export const scanPreview = (vipdoc_dir?: string) =>
-  post<ScanPreview>('/admin/market/scan/preview', { vipdoc_dir })
+export const scanPreview = (vipdoc_dir?: string, markets?: string[]) =>
+  post<ScanPreview>('/admin/market/scan/preview', { vipdoc_dir, markets })
+
+export async function uploadVipdoc(uploadId: string, files: File[], paths: string[]) {
+  const fd = new FormData()
+  fd.append('upload_id', uploadId)
+  fd.append('file_paths', JSON.stringify(paths))
+  for (const f of files) {
+    fd.append('files', f)
+  }
+  const r = await http.post<{ data: { vipdoc_dir: string } }>('/admin/market/upload-vipdoc', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return r.data
+}
 
 export const createImportTask = (payload: {
   task_type: 'incremental' | 'full'
   vipdoc_dir?: string
+  markets?: string[]
 }) => post<{ task_id: string; status: string }>('/admin/market/import-tasks', payload)
 
 export const listImportTasks = (params?: {
@@ -120,6 +134,9 @@ export const getImportTask = (taskId: string) =>
 
 export const taskProgressUrl = (taskId: string) =>
   `/api/v1/admin/market/import-tasks/${taskId}/progress`
+
+export const retryImportTask = (taskId: string) =>
+  post<{ message: string }>(`/admin/market/import-tasks/${taskId}/retry`)
 
 // ── 在线补数 ─────────────────────────────────────────────────────────────────
 export const onlineFetch = (payload: {

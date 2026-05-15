@@ -8,6 +8,9 @@ dependencies = [
     "pydantic>=2.7.0",
     "structlog>=24.4.0",
     "anyio>=4.4.0",
+    "pytdx>=1.68",
+    "exchange-calendars>=4.5.0",
+    "pandas>=2.2.0",
 ]
 
 [build-system]

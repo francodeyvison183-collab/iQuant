@@ -14,12 +14,18 @@ members = [
     "services/market-service",
     "packages/domain",
     "packages/market-data",
+    "packages/backtest-engine",
+    "packages/indicators",
+    "packages/strategy-dsl",
 ]
 
 [tool.uv.sources]
 iquant-domain = { workspace = true }
 iquant-market-data = { workspace = true }
 iquant-market-service = { workspace = true }
+iquant-backtest-engine = { workspace = true }
+iquant-indicators = { workspace = true }
+iquant-strategy-dsl = { workspace = true }
 iquant-api = { workspace = true }
 iquant-worker = { workspace = true }
 
