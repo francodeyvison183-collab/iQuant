@@ -161,6 +161,9 @@ export const listSymbols = (params?: {
   offset?: number
 }) => get<SymbolItem[]>('/admin/market/symbols', params)
 
+export const syncSymbols = () =>
+  post<{ message?: string }>('/admin/market/symbols/sync', {})
+
 export const queryBars = (params: {
   full_code: string
   period: string

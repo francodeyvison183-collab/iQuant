@@ -133,6 +133,7 @@ async def run_tdx_batch(  # noqa: PLR0915
     get_pool_cooldown_until: Callable[[], float] | None = None,
     cancel_check: Callable[[], bool] | None = None,
     log_summary: bool = True,
+    runtime_stats: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """以自适应并发 + 批次熔断 + 池冷却联动执行批量 TDX 任务。"""
     total = len(items)
@@ -170,6 +171,18 @@ async def run_tdx_batch(  # noqa: PLR0915
     }
     circuit_lock = asyncio.Lock()
     start_ts = time.time()
+
+    def _publish_runtime() -> None:
+        if runtime_stats is None:
+            return
+        elapsed = time.time() - start_ts
+        runtime_stats["elapsed_seconds"] = round(elapsed, 2)
+        runtime_stats["gate"] = gate.snapshot()
+        runtime_stats["batch_cooldown_until"] = float(circuit["cooldown_until"])
+        pool_remain = 0.0
+        if get_pool_cooldown_until is not None:
+            pool_remain = max(0.0, get_pool_cooldown_until() - time.time())
+        runtime_stats["pool_cooldown_remain_seconds"] = round(pool_remain, 1)
 
     logger.info(
         "[TdxBatchRunner] batch=%s items=%s cap_init=%s range=[%s,%s]",
@@ -261,6 +274,7 @@ async def run_tdx_batch(  # noqa: PLR0915
                         )
             finally:
                 await gate.release()
+                _publish_runtime()
                 queue.task_done()
 
     workers = [asyncio.create_task(_worker()) for _ in range(gate.maximum)]

@@ -16,10 +16,16 @@ async def test_run_tdx_batch_counts_success_and_failure() -> None:
         await asyncio.sleep(0)
         return i % 2 == 0
 
-    stats = await run_tdx_batch(items, process_one, name="ut", log_summary=False)
+    runtime: dict = {}
+    stats = await run_tdx_batch(
+        items, process_one, name="ut", log_summary=False, runtime_stats=runtime
+    )
     assert stats["total"] == 10
     assert stats["success"] == 5
     assert stats["failed"] == 5
+    assert runtime.get("elapsed_seconds", 0) >= 0
+    assert "gate" in runtime
+    assert runtime["gate"]["cap"] >= 2
 
 
 @pytest.mark.asyncio

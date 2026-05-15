@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
-import { getCoverage, listSymbols, queryBars, type BarPoint, type SymbolItem } from '@/api/market'
+import { ElMessage } from 'element-plus'
+import { getCoverage, listSymbols, queryBars, syncSymbols, type BarPoint, type SymbolItem } from '@/api/market'
 
 const market = ref<string>('')
 const keyword = ref('')
@@ -10,6 +11,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const loadingSymbols = ref(false)
+const syncingNames = ref(false)
 
 const selected = ref<SymbolItem | null>(null)
 const period = ref('day')
@@ -19,6 +21,18 @@ const coverage = ref<{ first_bar_time: string | null; last_bar_time: string | nu
 
 const chartRef = ref<HTMLDivElement | null>(null)
 let chart: echarts.ECharts | null = null
+
+async function onSyncNames() {
+  syncingNames.value = true
+  try {
+    const r = await syncSymbols()
+    ElMessage.success(r.data?.message || '已投递名称同步任务，约 1 分钟后刷新列表')
+  } catch (e: any) {
+    ElMessage.error(e.message || '同步失败')
+  } finally {
+    syncingNames.value = false
+  }
+}
 
 async function loadSymbols() {
   loadingSymbols.value = true
@@ -118,7 +132,19 @@ watch(period, loadBars)
   <el-row :gutter="16">
     <el-col :span="9">
       <el-card shadow="never">
-        <template #header>标的列表</template>
+        <template #header>
+          <span>标的列表</span>
+          <el-button
+            type="primary"
+            link
+            size="small"
+            style="float: right"
+            :loading="syncingNames"
+            @click="onSyncNames"
+          >
+            同步名称（TDX）
+          </el-button>
+        </template>
         <el-form inline>
           <el-form-item label="市场">
             <el-select v-model="market" placeholder="全部" clearable style="width: 120px">

@@ -37,7 +37,7 @@ from iquant_market_service.usecases.manage_hosts import (
 from iquant_market_service.usecases.query_bars import get_symbol_coverage, query_bars
 from iquant_market_service.usecases.scan_local import scan_local_preview
 
-from ...bootstrap import enqueue_market_import, enqueue_online_batch
+from ...bootstrap import enqueue_market_import, enqueue_online_batch, enqueue_sync_symbols
 
 # 通达信 connect.cfg 通常 < 16 KiB，给个宽松的安全上限避免上传超大文件
 _MAX_CFG_BYTES = 256 * 1024
@@ -309,6 +309,13 @@ async def api_online_batch(payload: OnlineBatchIn) -> dict:
 
 
 # ─── 数据查看 ─────────────────────────────────────────────────────────────────
+
+
+@router.post("/symbols/sync")
+async def api_sync_symbols() -> dict:
+    """从 TDX 全市场列表刷新标的名称（异步 Celery 任务）。"""
+    enqueue_sync_symbols()
+    return {"code": 0, "message": "标的名称同步任务已投递，请稍后刷新列表"}
 
 
 @router.get("/symbols")

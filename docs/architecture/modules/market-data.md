@@ -162,7 +162,7 @@ TdxHostManager（连接池按主站轮询，分散压力）
 ## 10. 待办（后续迭代）
 
 - 本地 15m / 30m / 60m 等 vipdoc 格式（若需要）；在线侧已由 pytdx 覆盖。
-- 引入 ``Symbol.name`` 维护任务（从行情或新浪/东方财富批量回填名称）。
+- ~~引入 ``Symbol.name`` 维护任务~~：已实现 ``sync_symbols``（TDX ``get_security_list`` → ``symbol`` 表）；在线批量/本地导入前自动同步，Beat 工作日 8:00 定时刷新。
 - 增加复权因子表与回算流水。
 - 接入 OpenTelemetry / Prometheus 指标（任务速率、解析耗时、文件大小分布）。
 - 为高频读路径增加 Redis 缓存（详见 `CACHING.md`）。

@@ -54,4 +54,11 @@ def setup_schedules(sender, **_kwargs):  # type: ignore[no-untyped-def]
             "kwargs": {"task_id": "scheduled-auto-incremental"},
             "options": {"queue": "market"},
         },
+        "symbol-names-daily": {
+            "task": "market.sync_symbols",
+            "schedule": __import__("celery.schedules", fromlist=["crontab"]).crontab(
+                hour=8, minute=0, day_of_week="mon,tue,wed,thu,fri"
+            ),
+            "options": {"queue": "market"},
+        },
     }

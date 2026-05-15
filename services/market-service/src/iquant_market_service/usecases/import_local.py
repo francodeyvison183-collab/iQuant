@@ -78,6 +78,17 @@ async def execute_import_task(
     if progress_cb:
         await progress_cb("start", {"task_id": task_id, "vipdoc_dir": vipdoc_dir})
 
+    try:
+        from .fetch_online import reload_tdx_source
+        from .sync_symbols import sync_symbols_from_tdx
+
+        tdx_pool = reload_tdx_source().pool
+        tdx_pool.reload_hosts()
+        sym_stats = await sync_symbols_from_tdx(pool=tdx_pool)
+        logger.info("import_local_symbol_sync", extra=sym_stats)
+    except Exception as exc:  # noqa: BLE001 — 名称同步失败不阻塞文件导入
+        logger.warning("import_local_symbol_sync_skipped", extra={"error": str(exc)})
+
     # 1) 扫描并对比状态
     async with pg_session() as ses:
         state_map = await ImportStateRepo(ses).load_state_map()

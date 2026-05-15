@@ -15,29 +15,42 @@ class SymbolRepo:
         self.s = session
 
     async def upsert(self, sym: Symbol) -> None:
-        stmt = (
-            pg_insert(SymbolORM)
-            .values(
-                code=sym.code,
-                market=sym.market.value,
-                full_code=sym.full_code,
-                name=sym.name,
-                asset_type=sym.asset_type,
-                list_date=sym.list_date,
-                delist_date=sym.delist_date,
-                extra={},
-            )
-            .on_conflict_do_update(
-                index_elements=[SymbolORM.full_code],
-                set_={
+        await self.bulk_upsert([sym])
+
+    async def bulk_upsert(self, symbols: list[Symbol], *, batch_size: int = 500) -> int:
+        """批量 upsert，返回名称有变更的行数（近似）。"""
+        if not symbols:
+            return 0
+        updated = 0
+        for i in range(0, len(symbols), batch_size):
+            chunk = symbols[i : i + batch_size]
+            values = [
+                {
+                    "code": sym.code,
+                    "market": sym.market.value,
+                    "full_code": sym.full_code,
                     "name": sym.name,
                     "asset_type": sym.asset_type,
                     "list_date": sym.list_date,
                     "delist_date": sym.delist_date,
+                    "extra": {},
+                }
+                for sym in chunk
+            ]
+            ins = pg_insert(SymbolORM)
+            stmt = ins.values(values).on_conflict_do_update(
+                index_elements=[SymbolORM.full_code],
+                set_={
+                    "name": ins.excluded.name,
+                    "asset_type": ins.excluded.asset_type,
+                    "list_date": ins.excluded.list_date,
+                    "delist_date": ins.excluded.delist_date,
                 },
+                where=SymbolORM.name.is_distinct_from(ins.excluded.name),
             )
-        )
-        await self.s.execute(stmt)
+            result = await self.s.execute(stmt)
+            updated += int(result.rowcount or 0)
+        return updated
 
     async def upsert_basic(self, full_code: str, market: Market, code: str) -> None:
         """从扫描结果创建占位标的，名称由后续维护任务回填。"""

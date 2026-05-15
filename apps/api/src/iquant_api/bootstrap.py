@@ -89,3 +89,8 @@ def enqueue_online_batch(task_id: str) -> None:
     get_celery_client().send_task(
         "market.online_batch", args=[task_id], queue="market", task_id=task_id
     )
+
+
+def enqueue_sync_symbols() -> None:
+    """投递全市场标的名称同步任务。"""
+    get_celery_client().send_task("market.sync_symbols", queue="market")

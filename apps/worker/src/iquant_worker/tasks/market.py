@@ -16,8 +16,10 @@ from iquant_market_service.models import MarketImportTaskStatus, MarketImportTas
 from iquant_market_service.progress_bus import publish
 from iquant_market_service.repositories.import_task_repo import ImportTaskRepo
 from iquant_market_service.usecases.batch_online_fetch import execute_batch_online_task
+from iquant_market_service.usecases.fetch_online import reload_tdx_source
 from iquant_market_service.usecases.import_local import execute_import_task
 from iquant_market_service.usecases.manage_hosts import test_hosts
+from iquant_market_service.usecases.sync_symbols import sync_symbols_from_tdx
 
 from ..celery_app import app
 
@@ -167,6 +169,14 @@ def task_online_batch(self, task_id: str | None = None) -> dict:  # type: ignore
 
 
 # ─── 主站测速 ────────────────────────────────────────────────────────────────
+
+
+@app.task(name="market.sync_symbols", soft_time_limit=600, time_limit=660)
+def task_sync_symbols() -> dict:
+    """从 TDX 全市场列表刷新 ``symbol`` 表名称。"""
+    pool = reload_tdx_source().pool
+    pool.reload_hosts()
+    return _run(sync_symbols_from_tdx(pool=pool))
 
 
 @app.task(name="market.test_hosts", soft_time_limit=60, time_limit=90)

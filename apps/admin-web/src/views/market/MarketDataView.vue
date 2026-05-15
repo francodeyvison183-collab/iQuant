@@ -96,51 +96,155 @@ async function onPreview() {
 }
 
 // ── SSE 进度管理 ──────────────────────────────────────────────────────────────
+type LiveProgress = {
+  total_files: number
+  done_files: number
+  imported_bars: number
+  status: string
+  task_type: string
+  error_count: number
+  error_message: string
+  code_count?: number
+  elapsed_seconds?: number
+  eta_seconds?: number | null
+  speed_per_minute?: number
+  concurrency_cap?: number
+  concurrency_active?: number
+  concurrency_max?: number
+  pool_cooldown_remain_seconds?: number
+  batch_cooldown_remain_seconds?: number
+}
+
 const liveTaskId = ref('')
-const liveProgress = ref({
+const liveProgress = ref<LiveProgress>({
   total_files: 0,
   done_files: 0,
   imported_bars: 0,
   status: '',
   task_type: '',
   error_count: 0,
-  error_message: ''
+  error_message: '',
 })
 const liveStocks = ref<{ full_code: string, period: string, inserted: number }[]>([])
 let es: EventSource | null = null
 
+const progressTickMs = ref(0)
+let progressTickTimer: ReturnType<typeof setInterval> | null = null
+let lastProgressAt = 0
+
+function isOnlineBatchProgress() {
+  return liveProgress.value.task_type === 'online_batch'
+}
+
+function formatDuration(sec: number | null | undefined): string {
+  if (sec == null || sec < 0 || Number.isNaN(sec)) return '-'
+  const s = Math.floor(sec)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const r = s % 60
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`
+  return `${m}:${String(r).padStart(2, '0')}`
+}
+
+function displayElapsed(): string {
+  const base = liveProgress.value.elapsed_seconds ?? 0
+  const extra =
+    ['running', 'queued', ''].includes(liveProgress.value.status)
+      ? progressTickMs.value / 1000
+      : 0
+  return formatDuration(base + extra)
+}
+
+function displayEta(): string {
+  const eta = liveProgress.value.eta_seconds
+  if (eta == null) {
+    return liveProgress.value.done_files > 0 ? '计算中…' : '-'
+  }
+  if (['running', 'queued', ''].includes(liveProgress.value.status) && progressTickMs.value > 0) {
+    const rate =
+      liveProgress.value.done_files > 0 && (liveProgress.value.elapsed_seconds ?? 0) > 0
+        ? liveProgress.value.done_files / (liveProgress.value.elapsed_seconds ?? 1)
+        : 0
+    if (rate > 0) {
+      const remain = Math.max(0, liveProgress.value.total_files - liveProgress.value.done_files)
+      return formatDuration(remain / rate)
+    }
+  }
+  return formatDuration(eta)
+}
+
+function concurrencyLabel(): string {
+  const cap = liveProgress.value.concurrency_cap
+  const active = liveProgress.value.concurrency_active
+  const max = liveProgress.value.concurrency_max
+  if (cap == null && max == null) return '-'
+  const a = active ?? 0
+  const c = cap ?? '-'
+  const m = max ?? '-'
+  return `${a} / ${c}（上限 ${m}）`
+}
+
+function onProgressPayload(data: Record<string, unknown>) {
+  liveProgress.value = { ...liveProgress.value, ...data } as LiveProgress
+  if (typeof data.elapsed_seconds === 'number') {
+    lastProgressAt = Date.now()
+    progressTickMs.value = 0
+  }
+  if (['running', 'queued', ''].includes(String(data.status ?? liveProgress.value.status))) {
+    startProgressTick()
+  }
+  if (data.recent_imported && Array.isArray(data.recent_imported)) {
+    liveStocks.value.unshift(...(data.recent_imported as typeof liveStocks.value))
+    if (liveStocks.value.length > 200) {
+      liveStocks.value.length = 200
+    }
+  }
+}
+
+function startProgressTick() {
+  if (progressTickTimer) return
+  progressTickTimer = setInterval(() => {
+    if (lastProgressAt > 0) {
+      progressTickMs.value = Date.now() - lastProgressAt
+    }
+  }, 1000)
+}
+
+function stopProgressTick() {
+  if (progressTickTimer) {
+    clearInterval(progressTickTimer)
+    progressTickTimer = null
+  }
+  progressTickMs.value = 0
+  lastProgressAt = 0
+}
+
 function connectSSE(taskId: string) {
   if (es) es.close()
+  stopProgressTick()
   liveTaskId.value = taskId
-  liveProgress.value = { 
-    total_files: 0, 
-    done_files: 0, 
-    imported_bars: 0, 
+  liveProgress.value = {
+    total_files: 0,
+    done_files: 0,
+    imported_bars: 0,
     status: 'running',
     task_type: '',
     error_count: 0,
-    error_message: ''
+    error_message: '',
   }
   liveStocks.value = []
-  
+
   const baseUrl = import.meta.env.VITE_API_BASE || '/api/v1'
   es = new EventSource(`${baseUrl}/admin/market/import-tasks/${taskId}/progress`)
-  
+
   es.addEventListener('progress', (e) => {
-    const data = JSON.parse(e.data)
-    liveProgress.value = { ...liveProgress.value, ...data }
-    
-    if (data.recent_imported) {
-      liveStocks.value.unshift(...data.recent_imported)
-      if (liveStocks.value.length > 200) {
-        liveStocks.value.length = 200
-      }
-    }
+    onProgressPayload(JSON.parse(e.data))
   })
   es.addEventListener('done', (e) => {
     try {
       const data = JSON.parse(e.data)
-      liveProgress.value = { ...liveProgress.value, ...data, status: data.status || 'succeeded' }
+      onProgressPayload(data)
+      liveProgress.value.status = data.status || 'succeeded'
       const bars = data.imported_bars ?? liveProgress.value.imported_bars
       if (bars > 0) {
         ElMessage.success(`任务完成，共入库 ${bars} 根 K 线`)
@@ -151,24 +255,29 @@ function connectSSE(taskId: string) {
       liveProgress.value.status = 'succeeded'
       ElMessage.success('任务执行完成')
     }
+    stopProgressTick()
     es?.close()
     refreshHistory()
   })
   es.addEventListener('error', (e) => {
     try {
       const data = JSON.parse(e.data)
-      liveProgress.value = { ...liveProgress.value, ...data, status: 'failed' }
+      onProgressPayload(data)
+      liveProgress.value.status = 'failed'
       ElMessage.error(data.message || data.error_message || '任务失败')
     } catch {
       liveProgress.value.status = 'failed'
       ElMessage.error('任务出错或连接断开')
     }
+    stopProgressTick()
     es?.close()
     refreshHistory()
   })
+  startProgressTick()
 }
 
 onUnmounted(() => {
+  stopProgressTick()
   if (es) es.close()
 })
 
@@ -532,6 +641,25 @@ async function onBatchSubmit() {
               <el-descriptions-item label="标的数量">{{ liveProgress.code_count || '-' }}</el-descriptions-item>
               <el-descriptions-item label="进度 (代码×周期)">{{ liveProgress.done_files }} / {{ liveProgress.total_files }}</el-descriptions-item>
               <el-descriptions-item label="入库 K 线数">{{ liveProgress.imported_bars }}</el-descriptions-item>
+              <el-descriptions-item label="已耗时">{{ displayElapsed() }}</el-descriptions-item>
+              <el-descriptions-item label="预计剩余">{{ displayEta() }}</el-descriptions-item>
+              <el-descriptions-item label="处理速度">
+                {{ liveProgress.speed_per_minute != null ? `${liveProgress.speed_per_minute} 对/分钟` : '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="并发">{{ concurrencyLabel() }}</el-descriptions-item>
+              <el-descriptions-item label="失败数">{{ liveProgress.error_count }}</el-descriptions-item>
+              <el-descriptions-item
+                v-if="liveProgress.batch_cooldown_remain_seconds"
+                label="批次熔断冷却"
+              >
+                {{ formatDuration(liveProgress.batch_cooldown_remain_seconds) }}
+              </el-descriptions-item>
+              <el-descriptions-item
+                v-if="liveProgress.pool_cooldown_remain_seconds"
+                label="池全局冷却"
+              >
+                {{ formatDuration(liveProgress.pool_cooldown_remain_seconds) }}
+              </el-descriptions-item>
             </el-descriptions>
             
             <el-progress 
@@ -601,6 +729,26 @@ async function onBatchSubmit() {
                 <el-descriptions-item label="类型">{{ taskTypeLabel(liveProgress.task_type) }}</el-descriptions-item>
                 <el-descriptions-item label="进度">{{ liveProgress.done_files }} / {{ liveProgress.total_files }}</el-descriptions-item>
                 <el-descriptions-item label="入库数">{{ liveProgress.imported_bars }}</el-descriptions-item>
+                <template v-if="isOnlineBatchProgress()">
+                  <el-descriptions-item label="已耗时">{{ displayElapsed() }}</el-descriptions-item>
+                  <el-descriptions-item label="预计剩余">{{ displayEta() }}</el-descriptions-item>
+                  <el-descriptions-item label="速度">
+                    {{ liveProgress.speed_per_minute != null ? `${liveProgress.speed_per_minute} 对/分钟` : '-' }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="并发">{{ concurrencyLabel() }}</el-descriptions-item>
+                  <el-descriptions-item
+                    v-if="liveProgress.batch_cooldown_remain_seconds || liveProgress.pool_cooldown_remain_seconds"
+                    label="冷却"
+                  >
+                    <span v-if="liveProgress.batch_cooldown_remain_seconds">
+                      批次 {{ formatDuration(liveProgress.batch_cooldown_remain_seconds) }}
+                    </span>
+                    <span v-if="liveProgress.pool_cooldown_remain_seconds">
+                      {{ liveProgress.batch_cooldown_remain_seconds ? '；' : '' }}池
+                      {{ formatDuration(liveProgress.pool_cooldown_remain_seconds) }}
+                    </span>
+                  </el-descriptions-item>
+                </template>
                 <el-descriptions-item v-if="liveProgress.error_message" label="错误">{{ liveProgress.error_message }}</el-descriptions-item>
               </el-descriptions>
               
