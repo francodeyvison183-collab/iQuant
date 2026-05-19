@@ -12,7 +12,8 @@
 ## 已记录决策
 
 - [ADR-0001 使用策略 DSL 作为核心契约](ADR-0001-strategy-dsl.md)
-- [ADR-0002 历史标注与盲测回放必须分离](ADR-0002-separate-labeling-and-blind-replay.md)
+- [ADR-0002 历史标注与盲测回放必须分离](ADR-0002-separate-labeling-and-blind-replay.md)（数据分源；主策略路径见 ADR-0011）
+- [ADR-0011 主路径：盲测训练归纳行为策略](ADR-0011-blind-replay-primary-strategy-path.md)
 - [ADR-0003 AI 不直接决定交易信号](ADR-0003-ai-boundary.md)
 - [ADR-0004 微信小程序优先](ADR-0004-wechat-miniprogram-first.md)
 - [ADR-0005 选择 FastAPI 作为后端 Web 框架](ADR-0005-fastapi-as-web-framework.md)

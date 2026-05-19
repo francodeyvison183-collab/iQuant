@@ -1,83 +1,50 @@
 # 09 数据与样本资产模块
 
+版本：V0.2（方案 A）
+
 ## 1. 模块定位
 
-数据与样本资产模块管理产品中的核心数据资产，包括行情数据、历史标注样本、盲测操作、策略 DSL、回测报告和执行诊断报告。
-
-该模块是底层支撑模块，不直接承担用户交互。
+管理行情、**盲测操作**、行为策略 DSL、回测报告、一致性/诊断报告及（辅助）开卷标注样本。
 
 ## 2. 用户价值
 
-- 保证用户样本、策略和报告可追溯。
-- 避免历史标注和盲测样本混淆。
-- 为策略验证、执行诊断和后续预警提供稳定数据基础。
+- 样本与策略可追溯、可版本化。
+- `blind_replay` 与 `historical_labeling` 严格分源。
+- 支撑回测、一致性评估与执行诊断。
 
-## 3. 核心边界
-
-本模块负责：
-
-- 定义核心数据模型。
-- 管理数据来源标识。
-- 管理样本状态。
-- 保证报告与策略版本的关联关系。
-
-本模块不负责：
-
-- 具体 UI 交互。
-- 具体回测计算。
-- AI 解释生成。
-
-## 4. 核心数据类型
+## 3. 核心数据类型
 
 | 数据类型 | 说明 |
 | --- | --- |
-| MarketBar | K 线数据 |
-| IndicatorSnapshot | 指标快照 |
-| HistoricalLabelTrade | 历史标注交易 |
-| StrategyDSL | 策略结构化规则 |
+| MarketBar | K 线 |
+| BlindReplaySession | 盲测会话（主路径） |
+| BlindReplayAction | 盲测操作 + features_snapshot |
+| ConsistencyReport | 跨轮一致性（可 JSON 落库） |
+| StrategyDSL | 行为策略（用户确认后） |
 | BacktestReport | 回测报告 |
-| BlindReplaySession | 盲测回放会话 |
-| BlindReplayAction | 盲测操作 |
-| ExecutionDiagnosisReport | 执行偏差诊断报告 |
-| TrainingTask | 训练任务 |
-| StrategyVersion | 策略版本 |
+| OptimizationSuggestion | 优化建议记录（关联 DSL 版本与回测 id） |
+| ExecutionDiagnosisReport | 执行偏差（DSL vs blind） |
+| TrainingTask | 专项训练 |
+| HistoricalLabelTrade | 开卷标注（辅助，`label_*`） |
 
-## 5. 关键原则
+## 4. 关键原则
 
-### 5.1 来源必须明确
-
-历史标注样本和盲测操作必须明确区分：
+### 4.1 来源必须明确
 
 ```text
-historical_labeling: 用于表达理想策略
-blind_replay: 用于诊断执行偏差
+blind_replay:           主路径 — 行为策略归纳、一致性评估
+historical_labeling:    辅助 — 对照/补录，禁止生成主策略
 ```
 
-### 5.2 报告必须可追溯
+### 4.2 策略版本不可覆盖
 
-回测报告必须关联：
+DSL 参数变更 → 新版本 + 新回测。
 
-- 策略版本。
-- 行情数据版本。
-- 回测参数。
-- 成交规则。
+### 4.3 报告可追溯
 
-执行诊断报告必须关联：
+回测/诊断/一致性报告均关联：用户、策略版本（如有）、数据区间、规则版本。
 
-- 策略版本。
-- 盲测会话。
-- 用户操作记录。
-- 策略理论信号。
+## 5. 验收标准
 
-### 5.3 策略版本不可覆盖
-
-策略参数一旦变更，应创建新版本，而不是覆盖旧版本。
-
-## 6. 验收标准
-
-- 所有核心数据都有唯一 ID。
-- 所有样本都有明确来源。
-- 历史标注不会被误用于执行诊断。
-- 盲测操作不会被误用于生成理想策略。
-- 所有报告都能追溯到策略版本和数据输入。
-
+- [ ] 所有样本 `source` 可审计。
+- [ ] blind 不会被误标为 labeling；label 不会进入默认 `generate_from_blind` 路径。

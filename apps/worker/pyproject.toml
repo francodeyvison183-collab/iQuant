@@ -7,6 +7,7 @@ dependencies = [
     "iquant-domain",
     "iquant-market-data",
     "iquant-market-service",
+    "iquant-backtest-service",
     "celery[redis]>=5.4.0",
     "redis>=5.0.8",
     "structlog>=24.4.0",

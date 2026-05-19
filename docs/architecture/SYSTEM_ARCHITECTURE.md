@@ -73,58 +73,45 @@
 
 ## 4. 关键链路
 
-### 4.1 历史标注 → 理想策略 → 回测
+### 4.1 【主路径】盲测训练 → 一致性 → 行为策略 → 回测
+
+见 [ADR-0011](../decisions/ADR-0011-blind-replay-primary-strategy-path.md)。
 
 ```text
-小程序
-  ├─ POST /labels/sessions               创建标注会话
-  ├─ POST /labels/sessions/{id}/marks    提交买卖点
-  └─ POST /strategies/from-labels        触发策略生成
-       └─ strategy-service
-            ├─ 拉取标注样本
-            ├─ 调用 packages/indicators 抽特征
-            ├─ 调用 packages/strategy-dsl 输出候选 DSL
-            └─ 返回 3~5 个候选策略 ID
+H5 / 小程序
+  ├─ POST /replays/sessions              开启盲测
+  ├─ GET  /replays/sessions/{id}/bars    仅可见区间 K 线
+  ├─ POST /replays/sessions/{id}/actions 买/卖/观望 + 特征快照
+  └─ POST /replays/sessions/{id}/finish    结束会话
 
-小程序
-  └─ POST /backtests                     触发回测
-       └─ backtest-service
-            ├─ 入库回测任务
-            ├─ 投递 Celery 任务 run_backtest
-            └─ 返回 task_id
+多轮后
+  └─ GET  /replays/consistency-report    一致性评估 + 模式摘要
+       └─ blind-replay-service / diagnosis（规则引擎）
 
-worker
-  └─ run_backtest 任务
-       ├─ 拉取 DSL + 行情
-       ├─ 调用 packages/backtest-engine
-       ├─ 写入 BacktestReport
-       ├─ 缓存关键指标到 Redis
-       └─ 通过 Redis pub/sub 通知 API（或前端轮询）
+达标后
+  └─ POST /strategies/generate           从 blind 样本生成候选 DSL
+       └─ strategy-service（禁止默认消费 label_*）
 
-小程序
-  └─ GET /backtests/{task_id}            查询结果
+用户确认 DSL
+  └─ POST /backtests
+       └─ backtest-service → Celery run_backtest → BacktestReport
+
+  └─ GET  /strategies/{id}/suggestions   优化建议（DSL patch + 回测依据）
 ```
 
-### 4.2 盲测回放 → 执行偏差诊断
+### 4.2 【二期】行为 DSL 已建立 → 执行偏差诊断
 
 ```text
-小程序
-  ├─ POST /replays/sessions              开启盲测会话
-  ├─ POST /replays/sessions/{id}/step    推进一根 K 线
-  ├─ POST /replays/sessions/{id}/actions 提交买/卖/观望
-  └─ POST /replays/sessions/{id}/finish  结束盲测
+POST /replays/sessions（关联 strategy_id）
+  -> 每步记录 strategy_signal + user_action
+  -> finish -> Celery run_diagnosis
+       -> 对齐 DSL 信号与操作 -> ExecutionDiagnosisReport
+```
 
-API → replay-service
-  ├─ 每一步只下发"当前可见 K 线截止时间"
-  ├─ 未来 K 线在服务端完全隐藏（不传给前端）
-  └─ 操作记录写入 PostgreSQL（带时间戳与可见快照哈希）
+### 4.3 【辅助】开卷标注
 
-盲测结束 → 触发 Celery 任务 run_diagnosis
-  └─ diagnosis-service
-       ├─ 加载策略 DSL、用户操作、对应区间 K 线
-       ├─ 调用 packages/diagnosis-engine 计算偏差
-       ├─ 写入 ExecutionDiagnosisReport
-       └─ 触发 ai-service 生成解释（可异步）
+```text
+POST /labels/*   annotation-service（不接入主策略 generate 默认路径）
 ```
 
 ### 4.3 AI 解释

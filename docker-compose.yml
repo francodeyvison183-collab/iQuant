@@ -65,6 +65,9 @@ services:
     env_file: .env
     environment:
       TZ: ${TZ:-Asia/Shanghai}
+      IQUANT_REDIS_URL: redis://redis:6379/0
+      IQUANT_CELERY_BROKER_URL: redis://redis:6379/1
+      IQUANT_CELERY_RESULT_BACKEND: redis://redis:6379/2
     depends_on:
       postgres: { condition: service_healthy }
       timescaledb: { condition: service_healthy }
@@ -92,6 +95,9 @@ services:
     env_file: .env
     environment:
       TZ: ${TZ:-Asia/Shanghai}
+      IQUANT_REDIS_URL: redis://redis:6379/0
+      IQUANT_CELERY_BROKER_URL: redis://redis:6379/1
+      IQUANT_CELERY_RESULT_BACKEND: redis://redis:6379/2
     depends_on:
       postgres: { condition: service_healthy }
       timescaledb: { condition: service_healthy }
@@ -113,6 +119,10 @@ services:
     image: iquant-api:latest
     container_name: iquant-beat
     env_file: .env
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      IQUANT_CELERY_BROKER_URL: redis://redis:6379/1
+      IQUANT_CELERY_RESULT_BACKEND: redis://redis:6379/2
     depends_on:
       redis: { condition: service_healthy }
     command: >

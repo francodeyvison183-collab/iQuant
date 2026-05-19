@@ -7,6 +7,9 @@ from __future__ import annotations
 import os
 
 from celery import Celery
+from celery.signals import beat_init, worker_init
+
+from iquant_worker.error_logging import attach_error_log_file
 
 
 def _env(name: str, default: str) -> str:
@@ -20,7 +23,7 @@ app = Celery(
     "iquant",
     broker=broker_url,
     backend=result_backend,
-    include=["iquant_worker.tasks.market"],
+    include=["iquant_worker.tasks.market", "iquant_worker.tasks.strategy"],
 )
 
 app.conf.update(
@@ -33,6 +36,7 @@ app.conf.update(
     enable_utc=False,
     task_routes={
         "market.*": {"queue": "market"},
+        "strategy.*": {"queue": "default"},
     },
 )
 
@@ -62,3 +66,9 @@ def setup_schedules(sender, **_kwargs):  # type: ignore[no-untyped-def]
             "options": {"queue": "market"},
         },
     }
+
+
+@worker_init.connect
+@beat_init.connect
+def _setup_error_file_logging(**_kwargs) -> None:
+    attach_error_log_file(_env("IQUANT_WORKER_ERROR_LOG_PATH", "logs/iquant-worker-errors.log"))

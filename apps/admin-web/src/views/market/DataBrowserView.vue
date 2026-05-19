@@ -133,7 +133,7 @@ watch(period, loadBars)
     <el-col :span="9">
       <el-card shadow="never">
         <template #header>
-          <span>标的列表</span>
+          <span>标的列表（已入库 K 线）</span>
           <el-button
             type="primary"
             link
@@ -162,7 +162,9 @@ watch(period, loadBars)
           <el-table-column prop="name" label="名称" min-width="140" />
           <el-table-column prop="market" label="市场" width="80" />
         </el-table>
+        <el-empty v-if="!loadingSymbols && total === 0" description="暂无 K 线数据，请先完成本地导入或在线更新" />
         <el-pagination
+          v-if="total > 0"
           class="mt"
           small
           v-model:current-page="page"

@@ -132,18 +132,16 @@ export const listImportTasks = (params?: {
 export const getImportTask = (taskId: string) =>
   get<ImportTask>(`/admin/market/import-tasks/${taskId}`)
 
-export const taskProgressUrl = (taskId: string) =>
-  `/api/v1/admin/market/import-tasks/${taskId}/progress`
+export const createProgressTicket = (taskId: string) =>
+  post<{ ticket: string; expires_in: number }>(
+    `/admin/market/import-tasks/${taskId}/progress-ticket`,
+  )
+
+export const taskProgressUrl = (taskId: string, ticket: string) =>
+  `/api/v1/admin/market/import-tasks/${taskId}/progress?ticket=${encodeURIComponent(ticket)}`
 
 export const retryImportTask = (taskId: string) =>
   post<{ message: string }>(`/admin/market/import-tasks/${taskId}/retry`)
-
-// ── 在线补数 ─────────────────────────────────────────────────────────────────
-export const onlineFetch = (payload: {
-  full_code: string
-  period: string
-  max_count?: number
-}) => post<{ inserted: number }>('/admin/market/online/fetch', payload)
 
 export const createOnlineBatchTask = (payload: {
   markets?: string[]
@@ -159,7 +157,9 @@ export const listSymbols = (params?: {
   keyword?: string
   limit?: number
   offset?: number
-}) => get<SymbolItem[]>('/admin/market/symbols', params)
+  /** with_bars=仅已有 K 线；catalog=symbol 全表 */
+  scope?: 'with_bars' | 'catalog'
+}) => get<SymbolItem[]>('/admin/market/symbols', { scope: 'with_bars', ...params })
 
 export const syncSymbols = () =>
   post<{ message?: string }>('/admin/market/symbols/sync', {})

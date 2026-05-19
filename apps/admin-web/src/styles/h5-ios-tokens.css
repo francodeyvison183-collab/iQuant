@@ -1,0 +1,32 @@
+/**
+ * H5 /m 预览区：贴近 iOS 分组列表与导航语义的设计令牌。
+ * 仅在被 .h5-ios 包裹的 DOM  subtree 中使用。
+ */
+.h5-ios {
+  --h5-font-stack: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --h5-bg-grouped: #f2f2f7;
+  --h5-bg-elevated: #ffffff;
+  --h5-label-primary: rgba(0, 0, 0, 0.85);
+  --h5-label-secondary: rgba(60, 60, 67, 0.6);
+  --h5-label-tertiary: rgba(60, 60, 67, 0.3);
+  --h5-separator: rgba(60, 60, 67, 0.29);
+  --h5-tint: #007aff;
+  --h5-tint-pressed: #0062cc;
+  --h5-danger: #ff3b30;
+  --h5-radius-cell: 10px;
+  --h5-radius-button: 12px;
+  --h5-group-gap: 20px;
+  --h5-row-h: 44px;
+  --h5-tabbar-h: 49px;
+  --h5-content-inset-top: max(env(safe-area-inset-top, 0px), 52px);
+  --h5-content-inset-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
+
+  font-family: var(--h5-font-stack);
+  color: var(--h5-label-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+.h5-ios button {
+  font-family: inherit;
+}

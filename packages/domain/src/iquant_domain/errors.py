@@ -4,6 +4,8 @@
     IquantError
         ├─ ValidationError      # 输入或 Schema 校验失败
         ├─ NotFoundError        # 资源不存在
+        ├─ AuthError            # 鉴权失败
+        ├─ RateLimitedError     # 触发限流
         └─ MarketDataError      # 行情数据相关错误
                 ├─ TdxProtocolError     # TDX 协议错误
                 ├─ TdxHostUnavailable   # 所有主站都不可用
@@ -30,6 +32,20 @@ class ValidationError(IquantError):
 
 class NotFoundError(IquantError):
     code = "RESOURCE_NOT_FOUND"
+
+
+class AuthError(IquantError):
+    code = "AUTH_INVALID"
+
+
+class RateLimitedError(IquantError):
+    code = "RATE_LIMITED"
+
+
+class ServiceUnavailableError(IquantError):
+    """依赖服务（Redis、数据库等）不可用。"""
+
+    code = "SERVICE_UNAVAILABLE"
 
 
 class MarketDataError(IquantError):

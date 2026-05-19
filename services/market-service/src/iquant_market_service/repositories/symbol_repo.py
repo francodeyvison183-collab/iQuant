@@ -94,3 +94,16 @@ class SymbolRepo:
         return (
             await self.s.execute(select(SymbolORM).where(SymbolORM.full_code == full_code))
         ).scalar_one_or_none()
+
+    async def name_map(self, full_codes: list[str]) -> dict[str, str]:
+        """批量取名称；无记录或空名称时不包含在结果中。"""
+        if not full_codes:
+            return {}
+        rows = (
+            await self.s.execute(
+                select(SymbolORM.full_code, SymbolORM.name).where(
+                    SymbolORM.full_code.in_(full_codes)
+                )
+            )
+        ).all()
+        return {fc: nm for fc, nm in rows if nm and nm.strip()}

@@ -86,48 +86,81 @@ symbol
 
 K 线本体放 TimescaleDB，详见 §4。
 
-### 3.3 标注与样本
+### 3.3 盲测与样本（主路径 · 方案 A）
+
+产品主路径见 [ADR-0011](../decisions/ADR-0011-blind-replay-primary-strategy-path.md)。规划表（实现随迭代 1 落地）：
+
+```text
+blind_session
+  id, user_id, full_code, period, range_start, range_end
+  status, strategy_id (nullable，对照 DSL 阶段使用)
+  visible_cursor, created_at / updated_at
+
+blind_action
+  id, session_id, bar_time, user_action (buy/sell/hold)
+  features_snapshot (jsonb), strategy_signal (nullable)
+  user_reason, confidence
+
+consistency_report
+  user_id, period, scores_json, insights_json, created_at
+
+strategy / strategy_version   # 见 §3.4
+```
+
+### 3.4 开卷标注（辅助 · 已实现）
+
+`label_*` 表用于对照/补录，**不得**作为生成主策略的默认输入。见 [01 历史 K 线标注](../product/modules/01-historical-labeling.md)。
 
 ```text
 label_session
-  id (ulid, pk)
-  user_id (fk, idx)
-  symbol_id (fk, idx)
-  period (varchar)                     day / 60m / 30m / 15m
-  range_start (timestamptz)
-  range_end (timestamptz)
-  status (varchar)                     drafting / submitted / archived
-  source (varchar)                     historical_labeling                  -- 与盲测严格区分
+  id (uuid, pk)
+  admin_user_id (int, fk, nullable)    迭代 1 管理员；预留 user_id
+  full_code (varchar)
+  period (varchar)
+  title (varchar, nullable)
+  idempotency_key (varchar, nullable)
   created_at / updated_at
-  unique(user_id, symbol_id, period, range_start, range_end)
-```
-
-```text
-label_point
-  id (ulid, pk)
-  session_id (fk, idx)
-  bar_time (timestamptz)
-  bar_index (bigint)
-  side (varchar)                       buy / sell
-  note (text)
-  features_snapshot (jsonb)            生成策略时的特征快照
-  created_at
 ```
 
 ```text
 label_pair
-  id (ulid, pk)
-  session_id (fk)
-  buy_point_id (fk)
-  sell_point_id (fk)
-  realized_return (numeric)
-  hold_days (integer)
-  created_at
+  id (uuid, pk)
+  session_id (fk, idx)
+  sort_order (int)
+  buy_bar_time / sell_bar_time (timestamptz)
+  buy_close / sell_close (numeric)
+  return_pct (numeric)
 ```
 
-`label_session.source` 字段强制区分标注与盲测来源，呼应 [ADR-0002](../decisions/ADR-0002-separate-labeling-and-blind-replay.md)。
+```text
+label_batch
+  id (uuid, pk)
+  admin_user_id (int)
+  period, market_filter, batch_size
+  status (varchar)                     active / completed
+  completed_at (timestamptz, nullable)
+```
 
-### 3.4 策略 DSL 与版本
+```text
+label_queue_item
+  id (uuid, pk)
+  batch_id (fk)
+  sort_order, full_code, symbol_name
+  status (varchar)                     pending / completed / skipped
+  session_id (fk, nullable)
+  skip_reason (varchar, nullable)
+```
+
+```text
+label_batch_summary
+  batch_id (uuid, pk, fk)
+  stats_json, profile_draft (text)
+  insights_json, correction_options_json, user_corrections_json
+```
+
+盲测域与标注域**分表、分 API**（[ADR-0002](../decisions/ADR-0002-separate-labeling-and-blind-replay.md)）。行为策略 DSL 由 **blind** 样本归纳，不由 `label_pair` 默认驱动。
+
+### 3.5 策略 DSL 与版本
 
 ```text
 strategy
@@ -148,7 +181,7 @@ strategy_version
   version_no (integer)                 自增版本号
   dsl_schema_version (varchar)         DSL schema 版本
   dsl_payload (jsonb)                  完整 DSL
-  derived_from_label_session_id (fk, nullable)
+  derived_from_blind_profile_id (fk, nullable)   # 一致性/归纳批次；label 仅辅助对照
   ai_revision_of (fk, nullable)        若来自 AI 修改建议
   hash (varchar, idx)                  规范化 DSL 的内容哈希，用于幂等
   created_at
@@ -157,7 +190,7 @@ strategy_version
 
 `strategy_version` 不可变；任何修改创建新版本。`strategy.current_version_id` 指向当前激活版本。
 
-### 3.5 回测任务与报告
+### 3.6 回测任务与报告
 
 ```text
 backtest_task
@@ -186,7 +219,9 @@ backtest_report
 
 `backtest_report.detail_object_key` 指向 OSS 上的明细 JSON（交易流水、每日资金曲线等）。
 
-### 3.6 盲测会话与操作
+### 3.7 盲测会话与操作（实现命名）
+
+> 与 §3.3 规划对应；表名实现阶段可用 `replay_*` 或 `blind_*`，须统一 `source=blind_replay`。
 
 ```text
 replay_session
@@ -218,7 +253,7 @@ replay_event
 
 写入只追加；任何"撤销"必须新增反向事件而不是物理删除。
 
-### 3.7 执行诊断报告
+### 3.8 执行诊断报告
 
 ```text
 diagnosis_task
@@ -246,7 +281,7 @@ diagnosis_report
   created_at
 ```
 
-### 3.8 训练任务与进度
+### 3.9 训练任务与进度
 
 ```text
 training_plan
@@ -267,7 +302,7 @@ training_session
   created_at
 ```
 
-### 3.9 AI 对话与上下文
+### 3.10 AI 对话与上下文
 
 ```text
 ai_conversation
@@ -293,7 +328,7 @@ ai_message
   created_at
 ```
 
-### 3.10 预警准备（V0.6 起）
+### 3.11 预警准备（V0.6 起）
 
 ```text
 alert_rule

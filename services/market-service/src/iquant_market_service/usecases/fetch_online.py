@@ -3,14 +3,11 @@ from __future__ import annotations
 
 import logging
 
-from iquant_domain.market import KlinePeriod
 from iquant_market_data.tdx.host_manager import TdxHostManager
 from iquant_market_data.tdx.pool import TdxConnectionPool
 from iquant_market_data.tdx.source import TdxMarketDataSource
 
 from ..config import get_market_settings
-from ..db import ts_session
-from ..repositories.market_bar_repo import MarketBarRepo
 
 logger = logging.getLogger(__name__)
 
@@ -41,19 +38,3 @@ def reload_tdx_source() -> TdxMarketDataSource:
     _source = None
     return _ensure_source()
 
-
-async def fetch_and_save_online(
-    *,
-    full_code: str,
-    period: KlinePeriod,
-    max_count: int = 800,
-) -> int:
-    """在线拉取并落库，返回实际写入条数。"""
-    src = _ensure_source()
-    batch = await src.fetch_bars(full_code=full_code, period=period, limit=max_count)
-    if batch.is_empty:
-        return 0
-    async with ts_session() as ts:
-        inserted = await MarketBarRepo(ts).bulk_upsert(batch.bars, source="tdx-online")
-        await ts.commit()
-    return inserted

@@ -5,6 +5,8 @@ description = "iQuant 回测引擎：DSL 求值薄层 + 第三方指标封装"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "iquant-domain",
+    "iquant-strategy-dsl",
+    "iquant-indicators",
     "empyrical-reloaded>=0.5.12",
     "pytz>=2024.1",
     "numpy>=2.0.0",

@@ -140,9 +140,11 @@ Content-Type: application/json
 | 用户 | user | `GET /me`、`PATCH /me/profile` |
 | 标的 | symbol | `GET /symbols`、`GET /symbols/{code}` |
 | K 线 | bar | `GET /symbols/{code}/bars?period=day&from=...&to=...` |
-| 标注会话 | label_session | `POST /labels/sessions`、`POST /labels/sessions/{id}:submit` |
-| 标注点 | label_point | `POST /labels/sessions/{id}/marks:batch-create` |
-| 策略 | strategy | `POST /strategies/from-labels`、`GET /strategies`、`GET /strategies/{id}` |
+| 盲测会话 | replay_session | `POST /replays/sessions`、`POST .../actions`、`POST .../finish` |
+| 一致性报告 | consistency | `GET /replays/consistency-report`（或 `/users/me/training-profile`） |
+| 行为策略 | strategy | `POST /strategies/generate`（输入 blind）、`GET /strategies/{id}` |
+| 策略优化建议 | strategy_suggestion | `GET /strategies/{id}/suggestions`（DSL patch + 回测引用） |
+| 标注（辅助） | label_* | `POST /labels/batches`、`/labels/sessions` 等，不接入主策略 generate 默认路径 |
 | 策略版本 | strategy_version | `GET /strategies/{id}/versions`、`POST /strategies/{id}/versions` |
 | 回测 | backtest | `POST /backtests`、`GET /backtests/{id}` |
 | 盲测会话 | replay_session | `POST /replays/sessions`、`POST /replays/sessions/{id}:step` |

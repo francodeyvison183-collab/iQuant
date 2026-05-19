@@ -43,6 +43,8 @@ function Show-IQuantHelp {
   Write-Host "  .\make.ps1 dev-shell -s api        # 进入某个服务的容器"
   Write-Host "  .\make.ps1 migrate                 # 在 api 容器内执行 Alembic 升级到 head"
   Write-Host "  .\make.ps1 migrate-ts              # 时序库 Alembic 升级到 head"
+  Write-Host "  .\make.ps1 admin-bootstrap         # 创建首个管理员（需已 migrate）"
+  Write-Host "  .\make.ps1 seed-cyb                # 投递创业板近 6 个月日 K 测试数据任务"
   Write-Host "  .\make.ps1 revision -m `"说明`"      # 生成新 Alembic 迁移文件"
   Write-Host "  .\make.ps1 lint                    # ruff + mypy"
   Write-Host "  .\make.ps1 test                    # pytest"
@@ -90,6 +92,15 @@ switch ($Command) {
 
   "migrate-ts" {
     Invoke-Expression "$ComposeDev exec api .venv/bin/alembic -c storage/migrations/alembic.ini -n timescale upgrade head"
+  }
+
+  "admin-bootstrap" {
+    # 使用 run 以便重新读取 .env；挂载的 /workspace/.env 也会被 identity 配置加载
+    Invoke-Expression "$ComposeDev run --rm --no-deps api .venv/bin/python -m iquant_api.cli.admin_bootstrap"
+  }
+
+  "seed-cyb" {
+    Invoke-Expression "$ComposeDev exec api .venv/bin/python -m iquant_api.cli.seed_test_cyb"
   }
 
   "revision" {

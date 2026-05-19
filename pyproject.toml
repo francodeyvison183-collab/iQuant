@@ -12,6 +12,11 @@ members = [
     "apps/api",
     "apps/worker",
     "services/market-service",
+    "services/identity-service",
+    "services/annotation-service",
+    "services/blind-replay-service",
+    "services/strategy-service",
+    "services/backtest-service",
     "packages/domain",
     "packages/market-data",
     "packages/backtest-engine",
@@ -23,9 +28,14 @@ members = [
 iquant-domain = { workspace = true }
 iquant-market-data = { workspace = true }
 iquant-market-service = { workspace = true }
+iquant-identity-service = { workspace = true }
+iquant-annotation-service = { workspace = true }
+iquant-blind-replay-service = { workspace = true }
+iquant-strategy-service = { workspace = true }
+iquant-backtest-service = { workspace = true }
 iquant-backtest-engine = { workspace = true }
-iquant-indicators = { workspace = true }
 iquant-strategy-dsl = { workspace = true }
+iquant-indicators = { workspace = true }
 iquant-api = { workspace = true }
 iquant-worker = { workspace = true }
 

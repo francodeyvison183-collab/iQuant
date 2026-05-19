@@ -357,10 +357,10 @@ AI 可以读取诊断报告，但诊断引擎不能依赖 AI。
 
 | 产品模块 | 主要代码位置 |
 | --- | --- |
-| 历史 K 线标注 | apps/miniprogram/features/historical-labeling, services/strategy-service |
-| 理想策略生成 | packages/strategy-dsl, packages/indicators, services/strategy-service |
+| 近端历史盲测回放（主路径） | services/blind-replay-service（规划）, apps/admin-web/views/mobile |
+| 行为策略生成 | packages/strategy-dsl, services/strategy-service |
 | 回测验证 | packages/backtest-engine, services/backtest-service |
-| 盲测回放 | packages/replay-engine, services/replay-service |
+| 历史 K 线标注（辅助） | services/annotation-service, apps/admin-web/views/mobile |
 | 执行偏差诊断 | packages/diagnosis-engine, services/diagnosis-service |
 | 盲测训练 | services/diagnosis-service, apps/miniprogram/features/training |
 | AI 策略助手 | packages/ai-assistant, services/ai-service |
@@ -374,8 +374,9 @@ AI 可以读取诊断报告，但诊断引擎不能依赖 AI。
 
 每个模块只处理自己的核心问题：
 
-- 标注模块只处理理想样本表达。
-- 策略生成模块只生成理想策略。
+- 标注模块只处理开卷样本（辅助）。
+- 盲测模块记录闭卷决策与特征快照。
+- 策略生成模块从 blind 样本归纳行为策略 DSL。
 - 回测模块只验证策略盈利能力。
 - 盲测模块只记录用户真实操作。
 - 诊断模块只计算执行偏差。

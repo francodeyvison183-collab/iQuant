@@ -2,10 +2,20 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { createImportTask, scanPreview, type ScanPreview, createOnlineBatchTask, onlineFetch, uploadVipdoc, listImportTasks, retryImportTask } from '@/api/market'
+import {
+  createImportTask,
+  scanPreview,
+  type ScanPreview,
+  createOnlineBatchTask,
+  uploadVipdoc,
+  listImportTasks,
+  retryImportTask,
+  createProgressTicket,
+  taskProgressUrl,
+} from '@/api/market'
 
 const router = useRouter()
-const tab = ref<'local' | 'single' | 'batch' | 'history'>('local')
+const tab = ref<'local' | 'batch' | 'history'>('local')
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
@@ -219,7 +229,7 @@ function stopProgressTick() {
   lastProgressAt = 0
 }
 
-function connectSSE(taskId: string) {
+async function connectSSE(taskId: string) {
   if (es) es.close()
   stopProgressTick()
   liveTaskId.value = taskId
@@ -234,8 +244,20 @@ function connectSSE(taskId: string) {
   }
   liveStocks.value = []
 
-  const baseUrl = import.meta.env.VITE_API_BASE || '/api/v1'
-  es = new EventSource(`${baseUrl}/admin/market/import-tasks/${taskId}/progress`)
+  let ticketResp
+  try {
+    ticketResp = await createProgressTicket(taskId)
+  } catch {
+    ElMessage.error('无法获取进度订阅凭证')
+    return
+  }
+  const ticket = ticketResp.data?.ticket
+  if (!ticket) {
+    ElMessage.error('进度 ticket 无效')
+    return
+  }
+
+  es = new EventSource(taskProgressUrl(taskId, ticket))
 
   es.addEventListener('progress', (e) => {
     onProgressPayload(JSON.parse(e.data))
@@ -259,9 +281,13 @@ function connectSSE(taskId: string) {
     es?.close()
     refreshHistory()
   })
-  es.addEventListener('error', (e) => {
+  es.addEventListener('error', (e: Event) => {
     try {
-      const data = JSON.parse(e.data)
+      const raw = (e as MessageEvent).data
+      if (typeof raw !== 'string' || !raw) {
+        throw new Error('no message data')
+      }
+      const data = JSON.parse(raw)
       onProgressPayload(data)
       liveProgress.value.status = 'failed'
       ElMessage.error(data.message || data.error_message || '任务失败')
@@ -354,22 +380,6 @@ async function onSubmitImport() {
     connectSSE(r.data.task_id)
   } finally {
     submittingImport.value = false
-  }
-}
-
-// ── 在线单标的 ────────────────────────────────────────────────────────────────────
-const singleForm = ref({ full_code: 'sh600519', period: 'day', max_count: 800 })
-const singleSubmitting = ref(false)
-const singleLastInserted = ref<number | null>(null)
-
-async function onSingleFetch() {
-  singleSubmitting.value = true
-  try {
-    const r = await onlineFetch(singleForm.value)
-    singleLastInserted.value = r.data.inserted
-    ElMessage.success(`已写入 ${r.data.inserted} 根`)
-  } finally {
-    singleSubmitting.value = false
   }
 }
 
@@ -530,54 +540,12 @@ async function onBatchSubmit() {
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="在线单标的补数" name="single">
-        <el-alert
-          title="单标的在线补数"
-          type="info"
-          :closable="false"
-          description="使用通达信在线协议直接拉取最近 N 根 K 线并写入数据库。适合：单标的快速补齐当日或最近若干根。大规模历史导入请用『本地数据导入』或后面的『在线批量更新』。"
-          show-icon
-        />
-
-        <el-form class="mt" inline>
-          <el-form-item label="完整代码">
-            <el-input v-model="singleForm.full_code" placeholder="如 sh600519" style="width: 200px" />
-          </el-form-item>
-          <el-form-item label="周期">
-            <el-select v-model="singleForm.period" style="width: 140px">
-              <el-option label="1 分钟" value="1m" />
-              <el-option label="5 分钟" value="5m" />
-              <el-option label="15 分钟" value="15m" />
-              <el-option label="30 分钟" value="30m" />
-              <el-option label="60 分钟" value="60m" />
-              <el-option label="日线" value="day" />
-              <el-option label="周线" value="week" />
-              <el-option label="月线" value="month" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="最多条数">
-            <el-input-number v-model="singleForm.max_count" :min="1" :max="8000" :step="100" />
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" :loading="singleSubmitting" @click="onSingleFetch">拉取并入库</el-button>
-          </el-form-item>
-        </el-form>
-
-        <el-alert
-          v-if="singleLastInserted !== null"
-          class="mt"
-          :title="`本次写入 ${singleLastInserted} 根 K 线（已存在的会自动跳过）`"
-          type="success"
-          :closable="false"
-        />
-      </el-tab-pane>
-
       <el-tab-pane label="在线批量更新" name="batch">
         <el-alert
           title="按市场 / 周期 / 日期范围批量更新"
           type="warning"
           :closable="false"
-          description="选择市场和周期，TDX 协议会按代码×周期逐对在线拉取并补全 [起止日期] 范围内的 K 线。所有任务会进入『任务列表』，可在 SSE 进度页查看实时进度。注意：单次任务量大时会被 TDX 主站限速，请按需切片。"
+          description="选择市场和周期，TDX 协议会按代码×周期逐对在线拉取并补全 [起止日期] 范围内的 K 线。可在「任务记录」查看实时进度。单次任务量大时会被 TDX 主站限速，请按需切片；单只标的可在下方填写具体代码。"
           show-icon
         />
 

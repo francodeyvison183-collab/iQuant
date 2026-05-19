@@ -1,7 +1,5 @@
-"""回测引擎包（指标层已接 empyrical-reloaded，求值/撮合待实现）。"""
-from iquant_backtest_engine.metrics.performance import (
-    max_drawdown,
-    sharpe_ratio,
-)
+"""回测引擎：DSL 求值 + 撮合 + 指标。"""
+from .runner import bars_from_market, run_behavior_backtest
+from .types import BacktestRunResult, OhlcBar
 
-__all__ = ["max_drawdown", "sharpe_ratio"]
+__all__ = ["BacktestRunResult", "OhlcBar", "bars_from_market", "run_behavior_backtest"]

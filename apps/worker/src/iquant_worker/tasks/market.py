@@ -174,16 +174,24 @@ def task_online_batch(self, task_id: str | None = None) -> dict:  # type: ignore
 @app.task(name="market.sync_symbols", soft_time_limit=600, time_limit=660)
 def task_sync_symbols() -> dict:
     """从 TDX 全市场列表刷新 ``symbol`` 表名称。"""
-    pool = reload_tdx_source().pool
-    pool.reload_hosts()
-    return _run(sync_symbols_from_tdx(pool=pool))
+    try:
+        pool = reload_tdx_source().pool
+        pool.reload_hosts()
+        return _run(sync_symbols_from_tdx(pool=pool))
+    except Exception:
+        logger.exception("market_sync_symbols_failed")
+        raise
 
 
 @app.task(name="market.test_hosts", soft_time_limit=60, time_limit=90)
 def task_test_hosts() -> dict:
-    hosts = _run(test_hosts())
-    return {
-        "total": len(hosts),
-        "ok": sum(1 for h in hosts if h.status == "ok"),
-        "best": hosts[0].to_dict() if hosts else None,
-    }
+    try:
+        hosts = _run(test_hosts())
+        return {
+            "total": len(hosts),
+            "ok": sum(1 for h in hosts if h.status == "ok"),
+            "best": hosts[0].to_dict() if hosts else None,
+        }
+    except Exception:
+        logger.exception("market_test_hosts_failed")
+        raise

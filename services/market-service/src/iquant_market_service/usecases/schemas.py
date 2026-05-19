@@ -29,6 +29,18 @@ class ImportTaskRef(BaseModel):
     status: str
 
 
+class BrowserSymbolRow(BaseModel):
+    """数据浏览左侧标的行。"""
+
+    model_config = ConfigDict(frozen=True)
+
+    full_code: str
+    code: str
+    market: str
+    name: str
+    asset_type: str = "stock"
+
+
 class BarPoint(BaseModel):
     """API 友好的 K 线点。"""
 

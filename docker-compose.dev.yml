@@ -69,6 +69,10 @@ services:
       IQUANT_ENV: local
       # uvicorn --reload 在 Docker for Windows / Mac 上需要轮询监听
       WATCHFILES_FORCE_POLLING: "true"
+      # 覆盖 .env：容器内必须用 Compose 服务名 redis。宿主机若用 127.0.0.1 调试 API，勿改此处。
+      IQUANT_REDIS_URL: redis://redis:6379/0
+      IQUANT_CELERY_BROKER_URL: redis://redis:6379/1
+      IQUANT_CELERY_RESULT_BACKEND: redis://redis:6379/2
     depends_on:
       postgres: { condition: service_healthy }
       timescaledb: { condition: service_healthy }
@@ -78,6 +82,8 @@ services:
     volumes:
       # 整个仓库挂入容器，源码即改即生效
       - .:/workspace
+      # .venv 使用独立卷，避免 Windows 宿主机残缺 venv 覆盖容器内 Linux 环境
+      - venv_dev:/workspace/.venv
       # uv 缓存在卷里，避免每次 rebuild
       - uv_cache:/root/.cache/uv
       # 只读挂载宿主机通达信 vipdoc 目录（按 .env 配置）
@@ -88,7 +94,15 @@ services:
       - -lc
       - |
         set -euo pipefail
-        uv sync --all-packages --group dev
+        if [ ! -x .venv/bin/python ]; then
+          echo "[boot] .venv missing or invalid, recreating..."
+          rm -rf .venv
+        fi
+        if ! uv sync --all-packages --group dev; then
+          echo "[boot] uv sync failed, recreating .venv and retrying..."
+          rm -rf .venv
+          uv sync --all-packages --group dev
+        fi
         for host in postgres timescaledb; do
           for i in $$(seq 1 30); do
             if getent hosts "$$host" >/dev/null 2>&1 && nc -z "$$host" 5432; then
@@ -127,12 +141,16 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       WATCHFILES_FORCE_POLLING: "true"
+      IQUANT_REDIS_URL: redis://redis:6379/0
+      IQUANT_CELERY_BROKER_URL: redis://redis:6379/1
+      IQUANT_CELERY_RESULT_BACKEND: redis://redis:6379/2
     depends_on:
       postgres: { condition: service_healthy }
       timescaledb: { condition: service_healthy }
       redis: { condition: service_healthy }
     volumes:
       - .:/workspace
+      - venv_dev:/workspace/.venv
       - uv_cache:/root/.cache/uv
       - ${IQUANT_TDX_VIPDOC_HOST_DIR:-./storage/local/tdx_vipdoc}:${IQUANT_TDX_VIPDOC_DIR:-/data/tdx/vipdoc}:ro
     working_dir: /workspace
@@ -141,7 +159,15 @@ services:
       - -lc
       - |
         set -euo pipefail
-        uv sync --all-packages --group dev
+        if [ ! -x .venv/bin/python ]; then
+          echo "[boot] .venv missing or invalid, recreating..."
+          rm -rf .venv
+        fi
+        if ! uv sync --all-packages --group dev; then
+          echo "[boot] uv sync failed, recreating .venv and retrying..."
+          rm -rf .venv
+          uv sync --all-packages --group dev
+        fi
         exec .venv/bin/watchfiles --filter python \
           --ignore-paths '.venv,node_modules,__pycache__,logs,storage/local' \
           '.venv/bin/celery -A iquant_worker.celery_app worker -l INFO -Q market,default --concurrency=2' \
@@ -154,6 +180,8 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       VITE_API_BASE: ""
+      # 容器内 Vite 须走服务名；宿主机 pnpm dev 见 apps/admin-web/.env.example
+      VITE_API_PROXY: http://api:8000
       CHOKIDAR_USEPOLLING: "true"
       NPM_CONFIG_REGISTRY: ${IQUANT_NPM_REGISTRY:-https://registry.npmjs.org/}
       NPM_CONFIG_FETCH_RETRIES: "5"
@@ -182,5 +210,6 @@ volumes:
   postgres_data_dev:
   timescale_data_dev:
   redis_data_dev:
+  venv_dev:
   uv_cache:
   admin_web_node_modules:

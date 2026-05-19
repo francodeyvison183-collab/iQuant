@@ -8,7 +8,7 @@
 
 ## 1. 项目速览
 
-- 项目：**iQuant** —— 面向普通交易者的 AI 辅助交易策略验证与盲测训练产品。
+- 项目：**iQuant** —— 面向普通交易者的 AI 辅助交易策略验证与盲测训练产品；**核心定位**：历史盲测训练 → 一致性评估 → 行为策略 DSL → 回测与优化建议（见 [README](README.md)、[ADR-0011](docs/decisions/ADR-0011-blind-replay-primary-strategy-path.md)）。开卷 K 线标注为可选对照，非主路径。
 - 用户端：微信小程序；服务端：Python 后端（FastAPI + Celery）。
 - MVP 容量目标：稳定支撑 1 万注册用户，并保留向 10 万用户平滑扩容的路径。
 - 架构风格：**模块化单体（modular monolith）**，按 `apps/ → services/ → packages/` 严格单向依赖。
@@ -89,6 +89,13 @@ apps/*     ──▶  services/*  ──▶  packages/*  ──▶  packages/dom
 
 ## 4. 开发工作流
 
+### 4.0 容器内开发、测试与调试（**强制**）
+
+- **所有**与本仓库相关的**开发、测试、调试**（编写代码后的运行、单测、集成测、API/Worker/前端 dev server、lint/typecheck 等）必须在 **Docker Compose** 编排的容器内进行；默认编排见 [`docker-compose.dev.yml`](docker-compose.dev.yml)（如 `api`、`worker`、`admin-web` 服务及其启动命令中的 `uv sync` / `pnpm install` / 热重载进程）。
+- **禁止**在宿主机为承担上述工作流而**安装**本项目的运行时与工具链依赖（例如在本机创建用于跑本仓库的 Python venv、全局/用户级安装 `uv`/`pnpm` 后仅在本机执行 `pytest` / `ruff` / `mypy` / `vite dev` 等以替代容器）。依赖仍只通过仓库内的 `pyproject.toml`、`apps/*/pyproject.toml`、`package.json` 等声明；**锁文件与安装产物以容器内为准**。
+- 智能体或脚本需用终端执行上述命令时：应使用 `docker compose -f docker-compose.dev.yml exec <service> …`，或仓库提供的 **`make.ps1` / `Makefile`** 中已封装为面向 Compose 的目标；不得假设宿主机已具备与容器一致的 Python/Node 版本与依赖树。
+- 宿主机仅用于不替代容器环境的工作（如编辑文件、`git`、浏览文档）。若用户指令要求仅在宿主机执行与本条冲突的操作，须先与用户确认并说明偏离团队约定的风险。
+
 ### 4.1 启动开发环境
 
 **Windows PowerShell**：
@@ -129,7 +136,7 @@ apps/*     ──▶  services/*  ──▶  packages/*  ──▶  packages/dom
 - **Pydantic v2**：所有跨模块边界（API schema、service 入参、domain 模型）一律 Pydantic 模型，禁止裸 dict / ORM 越界。
 - **价格使用 `Decimal`**，时间使用 `datetime`（带时区 / UTC）。禁止 `float` 价格累加。
 - **错误模型**：业务异常继承 `iquant_domain.errors.IquantError`；API 层有统一 handler 翻译为 `{"error": {"code": ..., "message": ...}}`。
-- **日志**：`structlog.get_logger(__name__)`；关键路径打 `started/finished/decision`，错误打 ERROR + 上下文（trace_id、task_id）。**禁止用日志当业务通信**。
+- **日志**：`structlog.get_logger(__name__)`；关键路径打 `started/finished/decision`，错误打 ERROR + 上下文（trace_id、task_id）。**禁止用日志当业务通信**。**需持久化排障的错误与异常落盘**见 **§5.3**。
 - **配置**：全部走 `pydantic-settings` + 环境变量；不要把配置写死，不要 `os.environ[...]` 散落。
 - **ruff** 是唯一 lint+format 工具；行宽 100；双引号优先。
 - **文件 ≤ 400 行**作为软上限；超过先拆模块。
@@ -146,6 +153,13 @@ apps/*     ──▶  services/*  ──▶  packages/*  ──▶  packages/dom
 - I/O 路径默认 `async`（FastAPI + asyncpg + redis async）。
 - CPU 重活（向量化回测、指标计算、文件解析）保持同步，通过 Celery 进程隔离。
 - 禁止在 `async` 函数里直接调用 blocking 长任务；必要时 `run_in_executor` 或外抛到 Celery。
+
+### 5.3 异常与错误落盘（前端 / 后端 / 定时任务）
+
+- **后端（API 与各 service）**：对**需排障的异常**（未捕获异常、任务失败、依赖故障等）必须记录完整上下文（含栈、`trace_id` / `request_id`、路由等），并**写入**项目约定的 **ERROR 级滚动日志文件**（默认 `logs/iquant-api-errors.log`，环境变量 `IQUANT_API_ERROR_LOG_PATH`）。**预期内的业务校验失败**（如 `ValidationError` 返回 400）以 API 响应体为准，不要求写入 error 日志以免噪声；若需留痕走审计表或访问日志。
+- **定时任务（Celery Worker / Beat）**：任务入口与 Beat 触发的逻辑在失败分支须 `logger.exception`（或等价），并依赖 Worker/Beat 进程挂载的 **ERROR 文件**（默认 `logs/iquant-worker-errors.log`，`IQUANT_WORKER_ERROR_LOG_PATH`）。新增任务必须覆盖异常路径，不得静默吞掉栈信息。
+- **前端（admin-web 等）**：浏览器沙盒**不能**直接写宿主机文件；须通过 **`POST /api/v1/client-errors`** 将 Vue 运行时错误、`unhandledrejection`、关键 HTTP 失败等**上报**，由 API **追加写入 JSONL**（默认 `logs/iquant-admin-web-errors.log`，`IQUANT_CLIENT_ERROR_LOG_PATH`）。上报体禁止包含 token、密码、完整 Cookie。
+- 上述路径位于 `logs/`（仓库 `.gitignore`）；生产 Compose 将 `logs_data` 挂到容器内 `/workspace/logs`。
 
 ---
 
@@ -174,11 +188,14 @@ apps/*     ──▶  services/*  ──▶  packages/*  ──▶  packages/dom
 - 任务函数立刻委托给 service 用例，**不要在 task 里写业务逻辑**。
 - 所有任务必须可重入（依赖 `task_id` / `idempotency_key`），失败默认按指数退避重试。
 - 长任务必须设 `soft_time_limit` < `time_limit`，并把进度通过 `progress_bus` 发到 Redis pub/sub。
+- **新增 / 修改 Celery 任务**：失败与未预期异常须在任务内 `logger.exception`（或等价），并确保 Worker/Beat 进程挂载的 **ERROR 日志文件**能收录栈信息（见 **§5.3**）；不得静默吞异常。
 
 ---
 
 ## 7. 测试要求
 
+- 执行与调试测试（`pytest`、覆盖率等）须在 **§4.0** 规定的容器环境内进行，不得以宿主机临时虚拟环境替代。
+- 与前后端、任务相关的**可复现失败**应能通过 **§5.3** 约定的错误日志文件或 JSONL 在容器内定位；新增能力时检查是否已接入落盘或上报。
 - 包内单测：`packages/<name>/tests/`、`services/<name>-service/tests/`。
 - 跨层集成 / 端到端：`tests/integration/`、`tests/e2e/`。
 - 命名：`test_<被测函数>_<场景>_<期望>.py` / `def test_*()`。
@@ -195,12 +212,13 @@ apps/*     ──▶  services/*  ──▶  packages/*  ──▶  packages/dom
 1. **先读规范，再写代码**。本文档 + `docs/architecture/README.md` + 与任务相关的模块文档（如 `docs/architecture/modules/market-data.md`）。
 2. 探索仓库以确认现有约定；**不要从零臆造命名 / 目录**。
 3. 多步骤任务（≥ 3 步）开始前先列 TODO 清单，过程中持续维护。
+4. **开发、测试、调试命令**一律按 **§4.0** 在 Docker 容器内执行；不在宿主机为本仓库安装运行时与依赖以替代容器。
 
 ### 8.2 落地时
 
 1. **优先编辑已有文件，禁止无谓新建**。新建文件必须有结构上的理由（新模块、新用例、新组件）。
 2. **不要主动创建文档文件**（README、CHANGELOG、docs/*.md），除非用户明确要求或本文档要求。
-3. 修改 ≥ 3 个文件后，跑一次 ReadLints / 本地 `ruff check`，自己引入的 lint 错误必须自己修。
+3. 修改 ≥ 3 个文件后，在**容器内**跑一次 `ruff check`（及必要的 `mypy`），或使用 IDE ReadLints；若 IDE 与容器结论不一致，**以容器内结果为准**。自己引入的 lint 错误必须自己修。
 4. 涉及数据库结构 → 必须配套 Alembic 迁移。
 5. 涉及新依赖 → 改对应 `pyproject.toml` 而不是 `pip install` 后忘掉。
 6. 涉及 API 变更 → 同步更新 `apps/admin-web/src/api/*.ts`（如有 UI 消费）。
@@ -233,13 +251,14 @@ apps/*     ──▶  services/*  ──▶  packages/*  ──▶  packages/dom
 
 完成任务后，确认满足：
 
-- [ ] 类型注解齐全，`ruff check` 与 `mypy` 在改动文件上通过。
+- [ ] 类型注解齐全，**在容器内** `ruff check` 与 `mypy` 在改动文件上通过（见 §4.0）。
 - [ ] 修改 / 新增的公共函数有单测；现有测试无回归。
 - [ ] 涉及表结构 → 已写 Alembic 迁移；迁移可向下回滚。
 - [ ] 涉及配置 → `.env.example` 已同步新键。
 - [ ] 涉及前端 API 调用 → `apps/admin-web/src/api/*.ts` 已更新。
 - [ ] 涉及新依赖 → `pyproject.toml` + lock 已更新；PR 中已简要说明用途（若有）。
 - [ ] 未引入"重启容器才能生效"的回归。
+- [ ] 前后端与 Celery 相关错误已按 **§5.3** 可落盘（API/Worker ERROR 文件或前端经 `/api/v1/client-errors` 写入 JSONL）。
 - [ ] 未在代码里留无用注释 / 调试 print / TODO 而无追踪 issue。
 - [ ] 提交信息（如用户要求提交）符合现仓库风格（祈使句，中文 OK）。
 

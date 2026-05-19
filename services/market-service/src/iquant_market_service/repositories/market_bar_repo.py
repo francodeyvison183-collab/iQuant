@@ -105,6 +105,27 @@ class MarketBarRepo:
             q = q.where(MarketBarORM.period == period.value)
         return int((await self.s.execute(q)).scalar_one())
 
+    async def list_distinct_full_codes_paged(
+        self,
+        *,
+        market: str | None = None,
+        keyword: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[str], int]:
+        """已入库 K 线的 distinct ``full_code``（数据浏览默认列表源）。"""
+        base = select(MarketBarORM.full_code).distinct()
+        if market:
+            base = base.where(MarketBarORM.full_code.like(f"{market}%"))
+        if keyword:
+            kw = f"%{keyword}%"
+            base = base.where(MarketBarORM.full_code.ilike(kw))
+        count_stmt = select(func.count()).select_from(base.subquery())
+        total = int((await self.s.execute(count_stmt)).scalar_one())
+        q = base.order_by(MarketBarORM.full_code).limit(limit).offset(offset)
+        rows = (await self.s.execute(q)).scalars().all()
+        return list(rows), total
+
     async def coverage(
         self, *, full_code: str, period: KlinePeriod
     ) -> tuple[datetime | None, datetime | None, int]:

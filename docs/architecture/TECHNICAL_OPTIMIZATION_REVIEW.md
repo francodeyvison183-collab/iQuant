@@ -32,7 +32,7 @@
 - 模块化单体起步，代码边界按服务职责拆分。
 - API 与 Worker 分进程，重任务异步化。
 - 策略 DSL 作为核心契约。
-- 历史标注与盲测回放严格分离。
+- 历史标注与盲测回放严格分离；**主产品路径**以盲测归纳行为策略（[ADR-0011](decisions/ADR-0011-blind-replay-primary-strategy-path.md)）。
 - AI 不直接决定交易信号。
 - PostgreSQL 作为业务主库，Redis 用于缓存、限流、短期状态和任务 broker。
 - 回测、诊断、AI 调用必须有幂等键、超时、重试和降级。

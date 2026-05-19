@@ -5,7 +5,7 @@
 - ``TdxConnectionPool.fetch_bars_in_range_resilient``：首页估算 count、页间退避、空响应 1.5s 原线重试、换线、全局冷却。
 - ``iquant_market_data.tdx.batch_runner.run_tdx_batch``：自适应并发 2~8、连续 8 次失败熔断 60s、与池全局冷却联动。
 
-单标的快捷入口仍走 ``fetch_and_save_online``（最近 N 根），不受上述分页策略约束。
+单只标的可在任务参数中填写 ``codes``，仍走上述分页拉取策略。
 """
 from __future__ import annotations
 
